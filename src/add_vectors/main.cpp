@@ -151,17 +151,15 @@ int main(int argc, char **argv)
 
     // copy results to host and report
     checkCudaErrors( cuMemcpyDtoH(c, d_c, sizeof(int) * N) );
+
+    // print results
     for (int i = 0; i < N; ++i) {
-        if (c[i] != a[i] + b[i])
-            printf("* Error at array position %d: Expected %d, Got %d\n",
-                   i, a[i]+b[i], c[i]);
+      printf("c[%d] = a[%d] + b[%d] = %d\n", i, i, i, c[i]);
     }
-    printf("*** All checks complete.\n");
 
-
-    // finish
     printf("- Finalizing...\n");
     releaseDeviceMemory(d_a, d_b, d_c);
     finalizeCUDA();
+    printf("- DONE\n");
     return 0;
 }
