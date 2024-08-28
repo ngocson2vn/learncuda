@@ -177,3 +177,87 @@ Driver Handling: When the GPU driver (nvidia.ko) receives an IOCTL request from 
 Kernel Space Execution: The IOCTL request is handled by the GPU driver in kernel space. The driver interacts directly with the GPU hardware to perform the requested operation, such as programming the GPU's command processor or accessing GPU memory.
 Response to User Space: Once the operation is complete, the GPU driver sends a response back to libcuda.so through the IOCTL request. This response may contain status information, error codes, or other relevant data.
 By using IOCTL operations, libcuda.so and nvidia.ko can efficiently communicate and perform GPU-related operations, while maintaining the necessary isolation and security between user space and kernel space in the operating system.
+
+# CUDA module
+A CUDA (Compute Unified Device Architecture) module is a collection of CUDA code that can be compiled and executed on NVIDIA GPUs. It typically consists of one or more kernels, which are functions written in CUDA C or CUDA C++ that are executed on the GPU.
+
+Here's a simple example of a CUDA module that adds two arrays:
+
+Example: Adding Two Arrays with CUDA
+- CUDA Kernel: This is the function that runs on the GPU.
+- Host Code: This is the function that runs on the CPU and launches the CUDA kernel.
+
+*CUDA Kernel (Device Code)*
+```C++
+__global__ void add(int *a, int *b, int *c, int n) {
+    int index = threadIdx.x + blockIdx.x * blockDim.x;
+    if (index < n) {
+        c[index] = a[index] + b[index];
+    }
+}
+```
+
+*Host Code*
+```C++
+#include <iostream>
+#include <cuda_runtime.h>
+
+__global__ void add(int *a, int *b, int *c, int n);
+
+int main() {
+    int n = 10;
+    int size = n * sizeof(int);
+    int h_a[10], h_b[10], h_c[10];
+
+    // Initialize arrays
+    for (int i = 0; i < n; i++) {
+        h_a[i] = i;
+        h_b[i] = i * 2;
+    }
+
+    int *d_a, *d_b, *d_c;
+
+    // Allocate device memory
+    cudaMalloc((void**)&d_a, size);
+    cudaMalloc((void**)&d_b, size);
+    cudaMalloc((void**)&d_c, size);
+
+    // Copy arrays from host to device
+    cudaMemcpy(d_a, h_a, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_b, h_b, size, cudaMemcpyHostToDevice);
+
+    // Launch kernel with 1 block of 10 threads
+    add<<<1, 10>>>(d_a, d_b, d_c, n);
+
+    // Copy result from device to host
+    cudaMemcpy(h_c, d_c, size, cudaMemcpyDeviceToHost);
+
+    // Print results
+    for (int i = 0; i < n; i++) {
+        std::cout << h_a[i] << " + " << h_b[i] << " = " << h_c[i] << std::endl;
+    }
+
+    // Free device memory
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFree(d_c);
+
+    return 0;
+}
+```
+
+Explanation
+CUDA Kernel (add function):
+
+This function is executed on the GPU.
+__global__ indicates that this is a kernel function.
+The kernel adds corresponding elements of arrays a and b and stores the result in array c.
+Host Code:
+
+The host code is written in standard C++.
+It allocates memory on the GPU using cudaMalloc.
+It copies data from the host to the GPU using cudaMemcpy.
+It launches the CUDA kernel using the <<<>>> syntax.
+It copies the result back from the GPU to the host using cudaMemcpy.
+Finally, it frees the allocated GPU memory using cudaFree.
+This example demonstrates the basic structure of a CUDA program, including memory management and kernel invocation.
