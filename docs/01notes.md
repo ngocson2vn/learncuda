@@ -261,3 +261,33 @@ It launches the CUDA kernel using the <<<>>> syntax.
 It copies the result back from the GPU to the host using cudaMemcpy.
 Finally, it frees the allocated GPU memory using cudaFree.
 This example demonstrates the basic structure of a CUDA program, including memory management and kernel invocation.
+
+# CUDA Context
+```C++
+// Binds the specified CUDA context to the calling CPU thread.
+// Ref: https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__CTX.html#group__CUDA__CTX_1gbe562ee6258b4fcc272ca6478ca2a2f7
+CUresult cuCtxSetCurrent ( CUcontext ctx )
+
+// main.cpp
+if (options.num_cuda_ctx > 1) {
+  auto* exp_config = tf_options_.config.mutable_gpu_options()->mutable_experimental();
+  exp_config->set_own_cuda_context(true);
+  int num_cuda_context_sms = options.num_cuda_context_sms > 0 ? options.num_cuda_context_sms : -1;
+  exp_config->set_cuda_context_sms(num_cuda_context_sms);
+  exp_config->set_share_between_ctx(options.share_between_ctx);
+  exp_config->set_cuda_context_idx(options.num_cuda_ctx);
+  exp_config->set_device_resource_tag(model_name_);
+  tf_options_.target = "mc@" + tf_options_.target;
+})
+
+// tensorflow/core/common_runtime/gpu/gpu_device.cc
+const auto& gpu_exp_config = options.config.gpu_options().experimental();
+if (gpu_exp_config.own_cuda_context()) {
+  int device_id = tf_device_id.value();
+  int ctx_id = gpu_exp_config.cuda_context_idx();  // NOTE: reuse cuda context
+  se::cuda::AddCudaContextWithSms(device_id, ctx_id, gpu_exp_config.cuda_context_sms());
+  tf_device_id = se::cuda::PackDeviceContextId(device_id, ctx_id);
+  VLOG(1) << "Combine Device: " << tf_device_id.value()
+          << " & Context: " << ctx_id << " => " << intptr_t(device_id);
+}
+```
