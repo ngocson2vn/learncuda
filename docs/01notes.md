@@ -291,3 +291,6 @@ if (gpu_exp_config.own_cuda_context()) {
           << " & Context: " << ctx_id << " => " << intptr_t(device_id);
 }
 ```
+
+# Memory Hierarchy
+<img src="./memory.png" width="80%" />
