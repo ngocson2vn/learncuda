@@ -1,2 +1,5 @@
+.vscode/vc.*
 .DS_Store
 */.DS_Store
+main
+*.o

@@ -1,0 +1,7 @@
+{
+  "files.associations": {
+    "*.tcc": "cpp",
+    "random": "cpp"
+  },
+  "C_Cpp.errorSquiggles": "disabled"
+}
