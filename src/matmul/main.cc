@@ -4,6 +4,8 @@
 
 #include "matmul.h"
 
+constexpr static int kMaxElement = 100;
+
 void print_mat(int* a, const char* name, const dim3& dims) {
   printf("%s\n", name);
   printf("==============================================================\n");
@@ -11,19 +13,19 @@ void print_mat(int* a, const char* name, const dim3& dims) {
     printf("j = %-3d:", j);
     for (size_t i = 0; i < dims.x; i++) {
       printf(" %-6d", a[j * dims.x + i]);
-      if (i == 10 && i < dims.x) {
+      if (i == kMaxElement && i < dims.x) {
         printf(" ... %-6d", a[j * dims.x + (dims.x - 1)]);
         break;
       }
     }
     printf("\n");
-    if (j == 10 && j < dims.y) {
+    if (j == kMaxElement && j < dims.y) {
       j = dims.y - 1;
       printf(".\n.\n.\n");
       printf("j = %-3d:", j);
       for (size_t i = 0; i < dims.x; i++) {
         printf(" %-6d", a[j * dims.x + i]);
-        if (i == 10 && i < dims.x) {
+        if (i == kMaxElement && i < dims.x) {
           printf(" ... %-6d", a[j * dims.x + (dims.x - 1)]);
           break;
         }
@@ -47,7 +49,7 @@ int* matmul_cpu(int* MatA, int* MatB, const dim3& dimsA, const dim3& dimsB) {
 }
 
 int main() {
-  const int kBlockSize = 2;
+  const int kBlockSize = 4;
     std::random_device dev;
     std::mt19937 rng(dev());
     std::uniform_int_distribution<std::mt19937::result_type> dist3(1, 3); // distribution in range [1, 3]
@@ -78,15 +80,21 @@ int main() {
   // CPU
   int* MatC_cpu = matmul_cpu(MatA, MatB, dimsA, dimsB);
   print_mat(MatC_cpu, "MatC_cpu", dimsC);
-  printf("\n");
+  printf("\n\n");
 
-  // GPU
-  int* MatC_gpu = matmul<int, kBlockSize>(MatA, MatB, dimsA, dimsB);
-  print_mat(MatC_gpu, "MatC_gpu", dimsC);
-  printf("\n");
+  // GPU naive
+  int* MatC_naive = matmul<int, kBlockSize>(MatA, MatB, dimsA, dimsB);
+  print_mat(MatC_naive, "MatC_naive", dimsC);
+  printf("\n\n");
+
+  // GPU smem
+  int* MatC_smem = matmul<int, kBlockSize>(MatA, MatB, dimsA, dimsB);
+  print_mat(MatC_smem, "MatC_smem", dimsC);
+  printf("\n\n");
 
   free(MatA);
   free(MatB);
   free(MatC_cpu);
-  free(MatC_gpu);
+  free(MatC_naive);
+  free(MatC_smem);
 }
