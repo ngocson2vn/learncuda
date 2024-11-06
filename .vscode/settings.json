@@ -1,7 +1,18 @@
 {
   "files.associations": {
+    "*.cc": "cpp",
+    "*.cpp": "cpp",
+    "*.cu": "cpp",
+    "*.h": "cpp",
+    "*.hpp": "cpp",
     "*.tcc": "cpp",
-    "random": "cpp"
+    "random": "cpp",
+    "barrier": "cpp",
+    "streambuf": "cpp",
+    "fstream": "cpp",
+    "istream": "cpp",
+    "locale": "cpp",
+    "cstdio": "cpp"
   },
-  "C_Cpp.errorSquiggles": "disabled"
+  "C_Cpp.errorSquiggles": "enabled"
 }
