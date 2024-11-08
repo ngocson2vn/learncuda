@@ -294,3 +294,6 @@ if (gpu_exp_config.own_cuda_context()) {
 
 # Memory Hierarchy
 <img src="./memory.png" width="80%" />
+
+# CTA - Cooperative Thread Array
+https://docs.nvidia.com/cuda/parallel-thread-execution/#cooperative-thread-arrays
