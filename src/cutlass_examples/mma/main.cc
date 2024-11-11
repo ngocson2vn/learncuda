@@ -2,22 +2,31 @@
 #include <cstdio>
 #include <cassert>
 #include <iostream>
+#include <string>
 
 #include "gemm.h"
 #include "cutlass/util/print_error.hpp"
+#include "cutlass/util/helper_cuda.hpp"
 
 constexpr static int kMaxElement = 100;
 
 template <typename T>
 void print_mat(T* a, const char* name, const dim3& dims) {
   printf("%s\n", name);
-  printf("==============================================================\n");
+  int num_chars = 8 + 7 * dims.y;
+  printf("%s\n", std::string(num_chars, '-').c_str());
+  printf("      j:");
+  for (size_t j = 0; j < dims.y; j++) {
+    printf(" %6d", j);
+  }
+  printf("\n%s\n", std::string(num_chars, '-').c_str());
+
   for (size_t i = 0; i < dims.x; i++) {
     printf("i = %-3d:", i);
     for (size_t j = 0; j < dims.y; j++) {
-      printf(" %-6.1f", a[i * dims.y + j]);
+      printf(" %6.1f", a[i * dims.y + j]);
       if (j == kMaxElement && j < dims.y) {
-        printf(" ... %-6.1f", a[i * dims.y + (dims.y - 1)]);
+        printf(" ... %6.1f", a[i * dims.y + (dims.y - 1)]);
         break;
       }
     }
@@ -27,9 +36,9 @@ void print_mat(T* a, const char* name, const dim3& dims) {
       printf(".\n.\n.\n");
       printf("i = %-3d:", i);
       for (size_t j = 0; j < dims.y; j++) {
-        printf(" %-6.1f", a[i * dims.y + j]);
+        printf(" %6.1f", a[i * dims.y + j]);
         if (j == kMaxElement && j < dims.y) {
-          printf(" ... %-6.1f", a[i * dims.y + (dims.y - 1)]);
+          printf(" ... %6.1f", a[i * dims.y + (dims.y - 1)]);
           break;
         }
       }
@@ -39,15 +48,15 @@ void print_mat(T* a, const char* name, const dim3& dims) {
 }
 
 int main(int argc, char** argv) {
-  int m = 8;
+  int m = 32;
   if (argc >= 2)
     sscanf(argv[1], "%d", &m);
 
-  int n = 8;
+  int n = 32;
   if (argc >= 3)
     sscanf(argv[2], "%d", &n);
 
-  int k = 4;
+  int k = 8;
   if (argc >= 4)
     sscanf(argv[3], "%d", &k);
 
@@ -74,15 +83,8 @@ int main(int argc, char** argv) {
 
   thrust::host_vector<TA> h_A(m*k);
   thrust::host_vector<TB> h_B(n*k);
-  thrust::host_vector<TC> h_C(m*n);
-
-  // for (int j = 0; j < m*k; ++j) h_A[j] = static_cast<TA>( 2*(rand() / double(RAND_MAX)) - 1 );
-  // for (int j = 0; j < n*k; ++j) h_B[j] = static_cast<TB>( 2*(rand() / double(RAND_MAX)) - 1 );
   for (int j = 0; j < m*k; ++j) h_A[j] = static_cast<TA>(0.5);
   for (int j = 0; j < n*k; ++j) h_B[j] = static_cast<TB>(2);
-  for (int j = 0; j < m*n; ++j) h_C[j] = static_cast<TC>(-1);
-
-
 
   int ldA = 0, ldB = 0, ldC = m;
 
@@ -102,13 +104,21 @@ int main(int argc, char** argv) {
     assert(false);
   }
 
-  // Run once
-  test_mma(transA, transB, m, n, k,
+  // Init cuda
+  cute::device_init(0);
+
+  //==============================================================
+  // v1
+  //==============================================================
+  thrust::host_vector<TC> h_C_v1(m*n);
+  for (int j = 0; j < m*n; ++j) h_C_v1[j] = static_cast<TC>(0.0);
+
+  v1::test_mma_v1(transA, transB, m, n, k,
        alpha,
        h_A, ldA,
        h_B, ldB,
        beta,
-       h_C, ldC);
+       h_C_v1, ldC);
 
   printf("\n");
   print_mat(h_A.data(), "h_A", dim3(m, k, 1));
@@ -118,23 +128,25 @@ int main(int argc, char** argv) {
   print_mat(h_B.data(), "h_B", dim3(k, n, 1));
   printf("\n");
 
-  print_mat(h_C.data(), "h_C", dim3(m, n, 1));
-  // Timing iterations
-  // double gflops = (2.0*m*n*k) * 1e-9;
+  print_mat(h_C_v1.data(), "h_C_v1", dim3(m, n, 1));
 
-  // const int timing_iterations = 100;
-  // GPU_Clock timer;
-  // timer.start();
-  // for (int i = 0; i < timing_iterations; ++i) {
-  //   gemm(transA, transB, m, n, k,
-  //        alpha,
-  //        d_A.data().get(), ldA,
-  //        d_B.data().get(), ldB,
-  //        beta,
-  //        d_C.data().get(), ldC);
-  // }
-  // double cute_time = timer.seconds() / timing_iterations;
-  // CUTE_CHECK_LAST();
-  // printf("CUTE_GEMM:     [%6.1f]GFlop/s  (%6.4f)ms\n", gflops / cute_time, cute_time*1000);
+  //==============================================================
+  // v2
+  //==============================================================
+  thrust::host_vector<TC> h_C_v2(m*n);
+  for (int j = 0; j < m*n; ++j) h_C_v2[j] = static_cast<TC>(0.0);
+
+  printf("\n");
+  v2::test_mma_v2(transA, transB, m, n, k,
+       alpha,
+       h_A, ldA,
+       h_B, ldB,
+       beta,
+       h_C_v2, ldC);
+
+  printf("\n");
+  print_mat(h_C_v2.data(), "h_C_v2", dim3(m, n, 1));
+  printf("\n");
+
   return 0;
 }

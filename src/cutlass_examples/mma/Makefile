@@ -6,6 +6,7 @@ CUTLASS_INCLUDE = ../../../cutlass/include
 CUTLASS_UTIL = ../../../cutlass/tools/util/include
 
 NVCC_FLAGS = -std=c++17 --expt-relaxed-constexpr -gencode arch=compute_75,code=sm_75 -gencode arch=compute_86,code=sm_86
+NVCC_FLAGS += --disable-warnings
 cuda_version := $(shell /usr/local/cuda/bin/nvcc --version | grep cuda)
 $(info NVCC: $(cuda_version))
 cuda12_str := $(shell /usr/local/cuda/bin/nvcc --version | grep cuda_12)
@@ -16,11 +17,14 @@ endif
 # all: main
 # 	./main
 
-main: sgemm_1.o main.o
-	g++ -L$(CUDA_LIB) -lcudart -o main main.o sgemm_1.o
+main: sgemm_1.o sgemm_2.o main.o
+	g++ -L$(CUDA_LIB) -lcudart -o main main.o sgemm_1.o sgemm_2.o
 
 sgemm_1.o: sgemm_1.cu
 	$(NVCC) $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -I$(CUTLASS_INCLUDE) -I$(CUTLASS_UTIL) -c sgemm_1.cu
+
+sgemm_2.o: sgemm_2.cu
+	$(NVCC) $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -I$(CUTLASS_INCLUDE) -I$(CUTLASS_UTIL) -c sgemm_2.cu
 
 main.o: main.cc
 	$(NVCC) $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -I$(CUTLASS_INCLUDE) -I$(CUTLASS_UTIL) -c main.cc
