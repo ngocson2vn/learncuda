@@ -297,3 +297,34 @@ if (gpu_exp_config.own_cuda_context()) {
 
 # CTA - Cooperative Thread Array
 https://docs.nvidia.com/cuda/parallel-thread-execution/#cooperative-thread-arrays
+
+# GEMM modes
+Like most BLAS libraries [1, 17, 56, 59], LibShalom
+supports four types of GEMM kernels, NN, NT, TN and TT. Here,
+T and N respectively stand for a transposed and not transposed
+matrix. For example, GEMM for matrices A · B under the NT mode
+means matrix B is transposed (T) but matrix A is not (N).
+<br/>
+
+# Row and Column
+Math notation: a matrix with shape `[M, K]` means it has `M` rows and `N` columns.  
+CUDA notation: `M` goes along `y` axis and `N` goes along `x` axis.
+
+NumPy follows the exact math notation:
+```Python
+>>> import numpy as np
+>>> a = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+>>> a
+array([[ 1,  2,  3,  4],
+       [ 5,  6,  7,  8],
+       [ 9, 10, 11, 12]])
+>>> a.shape
+(3, 4)
+```
+
+## NumPy axis
+https://numpy.org/doc/stable/glossary.html#term-axis
+
+Another term for an array dimension. Axes are numbered left to right; axis 0 is the first element in the shape tuple.
+
+In a two-dimensional vector, the elements of axis 0 are rows and the elements of axis 1 are columns.

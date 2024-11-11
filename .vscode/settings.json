@@ -2,7 +2,7 @@
   "files.associations": {
     "*.cc": "cpp",
     "*.cpp": "cpp",
-    "*.cu": "cpp",
+    "*.cu": "cuda-cpp",
     "*.h": "cpp",
     "*.hpp": "cpp",
     "*.tcc": "cpp",
@@ -12,7 +12,28 @@
     "fstream": "cpp",
     "istream": "cpp",
     "locale": "cpp",
-    "cstdio": "cpp"
+    "cstdio": "cpp",
+    "__config": "cpp",
+    "type_traits": "cpp",
+    "array": "cpp",
+    "string": "cpp",
+    "string_view": "cpp",
+    "vector": "cpp",
+    "iostream": "cpp",
+    "bitset": "cpp",
+    "functional": "cpp",
+    "iomanip": "cpp",
+    "limits": "cpp",
+    "ostream": "cpp",
+    "ratio": "cpp",
+    "sstream": "cpp",
+    "__hash_table": "cpp",
+    "__locale": "cpp",
+    "filesystem": "cpp",
+    "ios": "cpp",
+    "iterator": "cpp",
+    "thread": "cpp",
+    "memory_resource": "cpp"
   },
-  "C_Cpp.errorSquiggles": "enabled"
+  "C_Cpp.errorSquiggles": "disabled"
 }

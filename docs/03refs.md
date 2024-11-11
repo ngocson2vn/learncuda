@@ -1,6 +1,8 @@
 # Blogs
 https://siboehm.com/articles/22/CUDA-MMM
 
+https://0mean1sigma.com/author/tushar/
+
 # Drawing tools
 https://excalidraw.com/
 

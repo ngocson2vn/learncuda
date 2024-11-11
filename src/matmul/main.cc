@@ -88,7 +88,7 @@ int main() {
   printf("\n\n");
 
   // GPU smem
-  int* MatC_smem = matmul<int, kBlockSize>(MatA, MatB, dimsA, dimsB);
+  int* MatC_smem = smem_matmul<int, kBlockSize>(MatA, MatB, dimsA, dimsB);
   print_mat(MatC_smem, "MatC_smem", dimsC);
   printf("\n\n");
 

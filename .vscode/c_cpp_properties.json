@@ -3,8 +3,11 @@
         {
             "name": "Linux",
             "includePath": [
-                "/usr/local/cuda/include/**",
-                "${workspaceFolder}/**"
+                "/usr/include",
+                "/usr/local/cuda/include",
+                "${workspaceFolder}/cutlass/include",
+                "${workspaceFolder}/cutlass/tools/util/include",
+                "${workspaceFolder}/src/**"
             ],
             "defines": [
                 "GOOGLE_CUDA"
@@ -15,7 +18,7 @@
             "intelliSenseMode": "${default}",
             "browse": {
                 "databaseFilename": "${workspaceFolder}/.vscode/vc.db",
-                "limitSymbolsToIncludedHeaders": false
+                "limitSymbolsToIncludedHeaders": true
             }
         }
     ],

@@ -81,15 +81,20 @@ template float* matmul<float, 32>(float* MatA, float* MatB, const dim3& dimsA, c
 // Shared memory matmul
 //====================================================================================================================================
 template <typename T, int BLOCK_SIZE>
-__global__ void smem_matrix_multiply(const T* A, const T* B, T* C, int widthA, int widthB)
-{
-  int block_row = blockIdx.y;
-  int block_col = blockIdx.x;
-  int xBlocks = widthA / BLOCK_SIZE;
-
-  // Each thread performs xBlocks operations
+__global__ void smem_matrix_multiply(const T* A, const T* B, T* C, const int widthA, const int widthB) {
+  //=============================================
+  // Prologue
+  //=============================================
+  const int block_row = blockIdx.y;
+  const int block_col = blockIdx.x;
+  const int kBlocks = widthA / BLOCK_SIZE;
   T Cval = 0;
-  for (int m = 0; m < xBlocks; m++) {
+
+  //=============================================
+  // Mainloop
+  //=============================================
+  // Each thread performs kBlocks operations
+  for (int m = 0; m < kBlocks; m++) {
     // Define sub-matrices of A and B
     __shared__ T Asub[BLOCK_SIZE * BLOCK_SIZE];
     __shared__ T Bsub[BLOCK_SIZE * BLOCK_SIZE];
@@ -113,11 +118,14 @@ __global__ void smem_matrix_multiply(const T* A, const T* B, T* C, int widthA, i
     // Make sure that all threads have finished matmul
     // before proceeding to next round
     __syncthreads();
-  }
+  } // Mainloop
 
+  //=============================================
+  // Epilogue
+  //=============================================
   // Store the result into C matrix
-  int row = block_row * blockDim.y + threadIdx.y;
-  int col = block_col * blockDim.x + threadIdx.x;
+  const int row = block_row * blockDim.y + threadIdx.y;
+  const int col = block_col * blockDim.x + threadIdx.x;
   C[row * widthB + col] = Cval;
 }
 
