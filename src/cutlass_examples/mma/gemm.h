@@ -27,4 +27,4 @@ test_mma_v2(char transA, char transB, int m, int n, int k,
      Beta beta,
      thrust::host_vector<TC>      & h_C, int ldC);
 
-} // namespace v1
+} // namespace v2

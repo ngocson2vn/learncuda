@@ -27,6 +27,12 @@ int main(int argc, char** argv) {
   print(s8);
   printf("\n\n");
 
+  // Default stride
+  Layout s2xs4_default = make_layout(Shape<_2, _4>{});
+  printf("s2xs4_default: ");
+  print_layout(s2xs4_default);
+  printf("\n\n");
+
   Layout s2xs4 = make_layout(
     make_shape(Int<2>{}, Int<4>{}),
     make_stride(Int<2>{}, Int<2>{})
@@ -39,6 +45,15 @@ int main(int argc, char** argv) {
   print1D(s2xs4);
   printf("\n\n");
   print2D(s2xs4);
+  printf("\n\n");
+
+  printf("m0: ");
+  Layout m0 = layout<0>(s2xs4);
+  print1D(m0);
+  printf("\n");
+  printf("m1: ");
+  Layout m1 = layout<1>(s2xs4);
+  print1D(m1);
   printf("\n\n");
 
   Layout s2xd4_a = make_layout(
@@ -59,6 +74,31 @@ int main(int argc, char** argv) {
   print_layout(s2xh4);
   printf("\n\n");
   print2D(s2xh4);
+  printf("\n\n");
+
+  // size - total number of elements
+  auto s2xs4_size = size(s2xs4);
+  printf("size(s2xs4): %d\n", (int)s2xs4_size);
+
+  printf("\n\n");
+  Layout a = Layout<Shape<_4, Shape<_3, _6>>>{};
+  printf("Layout<Shape<_4, Shape<_3, _6>>>{}: ");
+  print(a);
+  printf("\n");
+  print_layout(a);
+  printf("\n\n");
+
+  Layout s3xs6 = make_layout(
+    make_shape(Int<3>{}, Int<6>{}),
+    make_stride(Int<4>{}, Int<12>{})
+  );
+  printf("s3xs6: ");
+  print_layout(s3xs6);
+  printf("\n\n");
+
+  Layout s32xs8 = make_layout(Shape<_32, _8>{});
+  printf("s32xs8: ");
+  print_layout(s32xs8);
   printf("\n\n");
 
   return 0;

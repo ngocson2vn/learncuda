@@ -30,8 +30,8 @@
  **************************************************************************************************/
 #include "gemm.h"
 
-#include <cute/tensor.hpp>
 #include <cute/util/debug.hpp>
+#include <cute/tensor.hpp>
 
 #include "cutlass/util/print_error.hpp"
 #include "cutlass/util/GPU_Clock.hpp"
@@ -62,6 +62,7 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
   static_assert(cute::is_static<BThreadLayout>::value);
   static_assert(cute::is_static<CThreadLayout>::value);
 
+  // Layouts may be different but they must have the same size
   CUTE_STATIC_ASSERT_V(cute::size(tA) == cute::size(tB));                          // NumThreads
   CUTE_STATIC_ASSERT_V(cute::size(tC) == cute::size(tA));                          // NumThreads
 
@@ -98,9 +99,9 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
 
   // Get the appropriate blocks for this thread block
   auto cta_coord = cute::make_coord(blockIdx.x, blockIdx.y, cute::_);              // (m,n,k)
-  cute::Tensor gA = cute::local_tile(mA, cta_tiler, cta_coord, cute::Step<cute::_1, cute::X, cute::_1>{});  // (BLK_M,BLK_K,k)
-  cute::Tensor gB = cute::local_tile(mB, cta_tiler, cta_coord, cute::Step<cute::X, cute::_1, cute::_1>{});  // (BLK_N,BLK_K,k)
-  cute::Tensor gC = cute::local_tile(mC, cta_tiler, cta_coord, cute::Step<cute::_1, cute::_1, cute::X>{});  // (BLK_M,BLK_N)
+  cute::Tensor gA = cute::local_tile(mA, cta_tiler, cta_coord, cute::Step<cute::_1, cute::X, cute::_1>{});  // (BLK_M, BLK_K, k)
+  cute::Tensor gB = cute::local_tile(mB, cta_tiler, cta_coord, cute::Step<cute::X, cute::_1, cute::_1>{});  // (BLK_N, BLK_K, k)
+  cute::Tensor gC = cute::local_tile(mC, cta_tiler, cta_coord, cute::Step<cute::_1, cute::_1, cute::X>{});  // (BLK_M, BLK_N)
 
   // Shared memory buffers
   __shared__ TA smemA[cute::cosize_v<ASmemLayout>];
@@ -133,10 +134,12 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
 
   // Partition sA (M,K) by the rows of tC
   cute::Tensor tCsA = cute::local_partition(sA, tC, threadIdx.x, cute::Step<cute::_1, cute::X>{});   // (THR_M,BLK_K)
+
   // Partition sB (N,K) by the cols of tC
-  cute::Tensor tCsB = cute::local_partition(sB, tC, threadIdx.x, cute::Step<cute::X,cute::_1>{});   // (THR_N,BLK_K)
+  cute::Tensor tCsB = cute::local_partition(sB, tC, threadIdx.x, cute::Step<cute::X, cute::_1>{});   // (THR_N,BLK_K)
+
   // Partition gC (M,N) by the tile of tC
-  cute::Tensor tCgC = cute::local_partition(gC, tC, threadIdx.x, cute::Step<cute::_1,cute::_1>{});   // (THR_M,THR_N)
+  cute::Tensor tCgC = cute::local_partition(gC, tC, threadIdx.x, cute::Step<cute::_1, cute::_1>{});   // (THR_M,THR_N)
 
   // Allocate the accumulators -- same shape/layout as the partitioned data
   cute::Tensor tCrC = make_tensor_like(tCgC);                                // (THR_M,THR_N)
@@ -150,37 +153,6 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
   // Clear the accumulators
   clear(tCrC);
 
-#if 0
-  if(thread0()) {
-    cute::print("  mA : "); cute::print(  mA); cute::print("\n");
-    cute::print("  gA : "); cute::print(  gA); cute::print("\n");
-    cute::print("  sA : "); cute::print(  sA); cute::print("\n");
-    cute::print("tAgA : "); cute::print(tAgA); cute::print("\n");
-    cute::print("tAsA : "); cute::print(tAsA); cute::print("\n");
-  }
-#endif
-
-#if 0
-  if(thread0()) {
-    cute::print("  mB : "); cute::print(  mB); cute::print("\n");
-    cute::print("  gB : "); cute::print(  gB); cute::print("\n");
-    cute::print("  sB : "); cute::print(  sB); cute::print("\n");
-    cute::print("tBgB : "); cute::print(tBgB); cute::print("\n");
-    cute::print("tBsB : "); cute::print(tBsB); cute::print("\n");
-  }
-#endif
-
-#if 0
-  if(thread0()) {
-    cute::print("  mC : "); cute::print(  mC); cute::print("\n");
-    cute::print("  gC : "); cute::print(  gC); cute::print("\n");
-    cute::print("tCsA : "); cute::print(tCsA); cute::print("\n");
-    cute::print("tCsB : "); cute::print(tCsB); cute::print("\n");
-    cute::print("tCgC : "); cute::print(tCgC); cute::print("\n");
-    cute::print("tCrC : "); cute::print(tCrC); cute::print("\n");
-  }
-#endif
-
 #if 1
 
   // TUTORIAL: Example of a simple mainloop that read tiles of data into shared memory,
@@ -192,9 +164,38 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
 
   for (int k_tile = 0; k_tile < K_TILE_MAX; ++k_tile)
   {
+#if 1
+    if (cute::thread0()) {
+      printf("\n\n");
+      cute::print("  mA : "); cute::print(  mA); cute::print("\n");
+      cute::print("  gA : "); cute::print(  gA); cute::print("\n");
+      cute::print("  sA : "); cute::print(  sA); cute::print("\n");
+      cute::print("tAgA : "); cute::print(tAgA); cute::print("\n");
+      cute::print("tAsA : "); cute::print(tAsA); cute::print("\n");
+
+      cute::print("  mB : "); cute::print(  mB); cute::print("\n");
+      cute::print("  gB : "); cute::print(  gB); cute::print("\n");
+      cute::print("  sB : "); cute::print(  sB); cute::print("\n");
+      cute::print("tBgB : "); cute::print(tBgB); cute::print("\n");
+      cute::print("tBsB : "); cute::print(tBsB); cute::print("\n");
+
+      cute::print("  mC : "); cute::print(  mC); cute::print("\n");
+      cute::print("  gC : "); cute::print(  gC); cute::print("\n");
+      cute::print("tCsA : "); cute::print(tCsA); cute::print("\n");
+      cute::print("tCsB : "); cute::print(tCsB); cute::print("\n");
+      cute::print("tCgC : "); cute::print(tCgC); cute::print("\n");
+      cute::print("tCrC : "); cute::print(tCrC); cute::print("\n");
+      printf("\n\n");
+    }
+#endif
+
+    // Clear tAsA and tBsB
+    clear(tAsA);
+    clear(tBsB);
+
     // Copy gmem to smem with tA|tB thread-partitioned tensors
-    cute::copy(tAgA(cute::_,cute::_, k_tile), tAsA);      // A   (THR_M,THR_K) -> (THR_M,THR_K)
-    cute::copy(tBgB(cute::_,cute::_, k_tile), tBsB);      // B   (THR_N,THR_K) -> (THR_N,THR_K)
+    cute::copy(tAgA(cute::_, cute::_, k_tile), tAsA);      // A   (THR_M,THR_K) -> (THR_M,THR_K)
+    cute::copy(tBgB(cute::_, cute::_, k_tile), tBsB);      // B   (THR_N,THR_K) -> (THR_N,THR_K)
 
     // TUTORIAL: The above call to cute::copy(tAgA(cute::_,cute::_,k_tile), tAsA) is equivalent to
     //   cute::Tensor tAgAk = tAgA(cute::_,cute::_,k_tile);
@@ -267,8 +268,8 @@ gemm_nt(int m, int n, int k,
   auto dC = cute::make_stride(cute::Int<1>{}, ldC);                      // (dM, dN)
 
   // Define CTA tile sizes (static)
-  auto bM = cute::Int<4>{};
-  auto bN = cute::Int<4>{};
+  auto bM = cute::Int<8>{};
+  auto bN = cute::Int<8>{};
   auto bK = cute::Int<4>{};
   auto cta_tiler = cute::make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
 
@@ -282,10 +283,10 @@ gemm_nt(int m, int n, int k,
   auto tB = cute::make_layout(cute::make_shape(cute::Int<4>{}, cute::Int<4>{}));   // (n,k) -> thr_idx
   auto tC = cute::make_layout(cute::make_shape(cute::Int<4>{}, cute::Int<4>{}));   // (m,n) -> thr_idx
 
-  dim3 dimBlock(cute::size(tC));
+  dim3 threadsPerBlock(cute::size(tC));
   dim3 dimGrid(cute::size(cute::ceil_div(M, bM)),
                cute::size(cute::ceil_div(N, bN)));
-  gemm_device<<<dimGrid, dimBlock, 0, stream>>>
+  gemm_device<<<dimGrid, threadsPerBlock, 0, stream>>>
       (prob_shape, cta_tiler,
        A, dA, sA, tA,
        B, dB, sB, tB,
@@ -335,10 +336,10 @@ gemm_tn(int m, int n, int k,
   auto tB = cute::make_layout(cute::make_shape(cute::Int<32>{}, cute::Int< 8>{}), LayoutRight{});  // (n,k) -> thr_idx; k-major
   auto tC = cute::make_layout(cute::make_shape(cute::Int<16>{}, cute::Int<16>{}));                 // (m,n) -> thr_idx; m-major
 
-  dim3 dimBlock(cute::size(tC));
+  dim3 threadsPerBlock(cute::size(tC));
   dim3 dimGrid(cute::size(cute::ceil_div(M, bM)),
                cute::size(cute::ceil_div(N, bN)));
-  gemm_device<<<dimGrid, dimBlock, 0, stream>>>
+  gemm_device<<<dimGrid, threadsPerBlock, 0, stream>>>
       (prob_shape, cta_tiler,
        A, dA, sA, tA,
        B, dB, sB, tB,

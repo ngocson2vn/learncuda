@@ -153,28 +153,29 @@ int main(int argc, char** argv) {
        beta,
        h_C_v1, ldC);
 
+  printf("\n");
   print_mat("h_C_v1 AFTER", h_C_v1.data(), dim3(m, n, 1));
 
   //==============================================================
   // v2
   //==============================================================
-  thrust::host_vector<TC> h_C_v2(m*n);
-  for (int j = 0; j < m*n; ++j) h_C_v2[j] = static_cast<TC>(0.0);
-  printf("\n");
-  print_mat("h_C_v2 BEFORE", h_C_v2.data(), dim3(m, n, 1));
-  printf("\n");
+  // thrust::host_vector<TC> h_C_v2(m*n);
+  // for (int j = 0; j < m*n; ++j) h_C_v2[j] = static_cast<TC>(0.0);
+  // printf("\n");
+  // print_mat("h_C_v2 BEFORE", h_C_v2.data(), dim3(m, n, 1));
+  // printf("\n");
 
-  printf("\n");
-  v2::test_mma_v2(transA, transB, m, n, k,
-       alpha,
-       h_A, ldA,
-       h_B, ldB,
-       beta,
-       h_C_v2, ldC);
+  // printf("\n");
+  // v2::test_mma_v2(transA, transB, m, n, k,
+  //      alpha,
+  //      h_A, ldA,
+  //      h_B, ldB,
+  //      beta,
+  //      h_C_v2, ldC);
 
-  printf("\n");
-  print_mat("h_C_v2 AFTER", h_C_v2.data(), dim3(m, n, 1));
-  printf("\n");
+  // printf("\n");
+  // print_mat("h_C_v2 AFTER", h_C_v2.data(), dim3(m, n, 1));
+  // printf("\n");
 
   return 0;
 }

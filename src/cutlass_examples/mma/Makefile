@@ -6,13 +6,14 @@ CUTLASS_INCLUDE = ../../../cutlass/include
 CUTLASS_UTIL = ../../../cutlass/tools/util/include
 
 NVCC_FLAGS = -std=c++17 --expt-relaxed-constexpr -gencode arch=compute_75,code=sm_75 -gencode arch=compute_86,code=sm_86
-NVCC_FLAGS += --disable-warnings
 cuda_version := $(shell /usr/local/cuda/bin/nvcc --version | grep cuda)
 $(info NVCC: $(cuda_version))
 cuda12_str := $(shell /usr/local/cuda/bin/nvcc --version | grep cuda_12)
 ifneq ("$(cuda12_str)", "")
 	NVCC_FLAGS +=  -gencode arch=compute_90,code=sm_90
 endif
+
+NVCC_FLAGS += --disable-warnings
 
 # all: main
 # 	./main

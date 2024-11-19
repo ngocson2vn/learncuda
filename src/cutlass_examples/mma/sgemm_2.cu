@@ -264,9 +264,9 @@ gemm_nt(int m, int n, int k,
   auto dC = make_stride(Int<1>{}, ldC);                      // (dM, dN)
 
   // Define CTA tile sizes (static)
-  auto bM = Int<4>{};
-  auto bN = Int<4>{};
-  auto bK = Int<4>{};
+  auto bM = Int<128>{};
+  auto bN = Int<32>{};
+  auto bK = Int<8>{};
   auto cta_tiler = make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
 
   // Define the smem layouts (static)
@@ -282,10 +282,10 @@ gemm_nt(int m, int n, int k,
   // Use 32x8 of these threads.
 
   TiledCopy copyA = make_tiled_copy(Copy_Atom<UniversalCopy<uint128_t>, TA>{},
-                                    Layout<Shape<_4, _4>>{},  // Thr layout 32x8 m-major
+                                    Layout<Shape<_32, _8>>{},  // Thr layout 32x8 m-major
                                     Layout<Shape<_4, _1>>{}); // Val layout  4x1 m-major
   TiledCopy copyB = make_tiled_copy(Copy_Atom<UniversalCopy<uint128_t>, TB>{},
-                                    Layout<Shape<_4, _4>>{},  // Thr layout 32x8 n-major
+                                    Layout<Shape<_32, _8>>{},  // Thr layout 32x8 n-major
                                     Layout<Shape<_4, _1>>{}); // Val layout  4x1 n-major
 
   // TUTORIAL: Construct TiledMMA with a particular MMA_Atom to use and
@@ -294,7 +294,7 @@ gemm_nt(int m, int n, int k,
   // Reproduce that atom 16x16x1 times (m-major) across threads so that we use 256 threads.
 
   TiledMMA mmaC = make_tiled_mma(UniversalFMA<TC, TA, TB>{},
-                                 Layout<Shape<_4, _4, _1>>{});  // 16x16x1 UniversalFMA
+                                 Layout<Shape<_16, _16, _1>>{});  // 16x16x1 UniversalFMA
 
 #if 0
   print(copyA);
@@ -346,8 +346,8 @@ gemm_tn(int m, int n, int k,
 
   // Define CTA tile sizes (static)
   auto bM = Int<128>{};
-  auto bN = Int<128>{};
-  auto bK = Int<  8>{};
+  auto bN = Int<32>{};
+  auto bK = Int<8>{};
   auto cta_tiler = make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
 
   // Define the smem layouts (static)
@@ -363,10 +363,10 @@ gemm_tn(int m, int n, int k,
   // Use 32x8 of these threads arranged in k-major.
 
   TiledCopy copyA = make_tiled_copy(Copy_Atom<UniversalCopy<TA>, TA>{},
-                                    Layout<Shape<_4, _4>,Stride<_4,_1>>{}, // Thr layout 32x8 k-major
+                                    Layout<Shape<_32, _8>, Stride<_8, _1>>{}, // Thr layout 32x8 k-major
                                     Layout<Shape<_1, _1>>{});              // Val layout  1x1
   TiledCopy copyB = make_tiled_copy(Copy_Atom<UniversalCopy<TB>, TB>{},
-                                    Layout<Shape<_4, _4>,Stride<_4, _1>>{}, // Thr layout 32x8 k-major
+                                    Layout<Shape<_32, _8>, Stride<_8, _1>>{}, // Thr layout 32x8 k-major
                                     Layout<Shape<_1, _1>>{});              // Val layout  1x1
 
   // TUTORIAL: Construct TiledMMA to define the MMA_Atom to use and the
@@ -375,7 +375,7 @@ gemm_tn(int m, int n, int k,
   // Reproduce that atom 16x16x1 times (m-major) across threads so that we use 256 threads.
 
   TiledMMA mmaC = make_tiled_mma(UniversalFMA<TC, TA, TB>{},
-                                 Layout<Shape<_4, _4, _1>>{});  // 16x16x1 TiledMMA
+                                 Layout<Shape<_16, _16, _1>>{});  // 16x16x1 TiledMMA
 
 #if 0
   print(copyA);
