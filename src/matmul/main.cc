@@ -50,9 +50,9 @@ int* matmul_cpu(int* MatA, int* MatB, const dim3& dimsA, const dim3& dimsB) {
 
 int main() {
   const int kBlockSize = 4;
-    std::random_device dev;
-    std::mt19937 rng(dev());
-    std::uniform_int_distribution<std::mt19937::result_type> dist3(1, 3); // distribution in range [1, 3]
+  std::random_device dev;
+  std::mt19937 rng(dev());
+  std::uniform_int_distribution<std::mt19937::result_type> dist3(1, 3); // distribution in range [1, 3]
 
   const dim3 dimsA(3 * kBlockSize, 2 * kBlockSize); // rows(y): 2 x columns(x): 3
   int* MatA = new int[dimsA.x * dimsA.y];
