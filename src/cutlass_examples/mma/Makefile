@@ -5,7 +5,7 @@ CUDA_LIB = /usr/local/cuda/lib64
 CUTLASS_INCLUDE = ../../../cutlass/include
 CUTLASS_UTIL = ../../../cutlass/tools/util/include
 
-NVCC_FLAGS = -std=c++17 --expt-relaxed-constexpr -gencode arch=compute_75,code=sm_75 -gencode arch=compute_86,code=sm_86
+NVCC_FLAGS = -std=c++17 -g -O0 --compiler-options=-fno-inline --expt-relaxed-constexpr -gencode arch=compute_75,code=sm_75 -gencode arch=compute_86,code=sm_86
 cuda_version := $(shell /usr/local/cuda/bin/nvcc --version | grep cuda)
 $(info NVCC: $(cuda_version))
 cuda12_str := $(shell /usr/local/cuda/bin/nvcc --version | grep cuda_12)

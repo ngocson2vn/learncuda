@@ -1,0 +1,72 @@
+\documentclass[convert]{standalone}
+\usepackage{tikz}
+
+\begin{document}
+\begin{tikzpicture}[x={(0cm,-1cm)},y={(1cm,0cm)},every node/.style={minimum size=1cm, outer sep=0pt}]
+
+\node[fill={rgb,255:red,175;green,175;blue,255}] at (0,0) {\shortstack{T0 \\ V0}};
+\node[fill={rgb,255:red,175;green,175;blue,255}] at (0,1) {\shortstack{T8 \\ V0}};
+\node[fill={rgb,255:red,175;green,175;blue,255}] at (0,2) {\shortstack{T16 \\ V0}};
+\node[fill={rgb,255:red,175;green,175;blue,255}] at (0,3) {\shortstack{T24 \\ V0}};
+\node[fill={rgb,255:red,175;green,255;blue,175}] at (1,0) {\shortstack{T1 \\ V0}};
+\node[fill={rgb,255:red,175;green,255;blue,175}] at (1,1) {\shortstack{T9 \\ V0}};
+\node[fill={rgb,255:red,175;green,255;blue,175}] at (1,2) {\shortstack{T17 \\ V0}};
+\node[fill={rgb,255:red,175;green,255;blue,175}] at (1,3) {\shortstack{T25 \\ V0}};
+\node[fill={rgb,255:red,255;green,255;blue,175}] at (2,0) {\shortstack{T2 \\ V0}};
+\node[fill={rgb,255:red,255;green,255;blue,175}] at (2,1) {\shortstack{T10 \\ V0}};
+\node[fill={rgb,255:red,255;green,255;blue,175}] at (2,2) {\shortstack{T18 \\ V0}};
+\node[fill={rgb,255:red,255;green,255;blue,175}] at (2,3) {\shortstack{T26 \\ V0}};
+\node[fill={rgb,255:red,255;green,175;blue,175}] at (3,0) {\shortstack{T3 \\ V0}};
+\node[fill={rgb,255:red,255;green,175;blue,175}] at (3,1) {\shortstack{T11 \\ V0}};
+\node[fill={rgb,255:red,255;green,175;blue,175}] at (3,2) {\shortstack{T19 \\ V0}};
+\node[fill={rgb,255:red,255;green,175;blue,175}] at (3,3) {\shortstack{T27 \\ V0}};
+\node[fill={rgb,255:red,210;green,210;blue,255}] at (4,0) {\shortstack{T4 \\ V0}};
+\node[fill={rgb,255:red,210;green,210;blue,255}] at (4,1) {\shortstack{T12 \\ V0}};
+\node[fill={rgb,255:red,210;green,210;blue,255}] at (4,2) {\shortstack{T20 \\ V0}};
+\node[fill={rgb,255:red,210;green,210;blue,255}] at (4,3) {\shortstack{T28 \\ V0}};
+\node[fill={rgb,255:red,210;green,255;blue,210}] at (5,0) {\shortstack{T5 \\ V0}};
+\node[fill={rgb,255:red,210;green,255;blue,210}] at (5,1) {\shortstack{T13 \\ V0}};
+\node[fill={rgb,255:red,210;green,255;blue,210}] at (5,2) {\shortstack{T21 \\ V0}};
+\node[fill={rgb,255:red,210;green,255;blue,210}] at (5,3) {\shortstack{T29 \\ V0}};
+\node[fill={rgb,255:red,255;green,255;blue,210}] at (6,0) {\shortstack{T6 \\ V0}};
+\node[fill={rgb,255:red,255;green,255;blue,210}] at (6,1) {\shortstack{T14 \\ V0}};
+\node[fill={rgb,255:red,255;green,255;blue,210}] at (6,2) {\shortstack{T22 \\ V0}};
+\node[fill={rgb,255:red,255;green,255;blue,210}] at (6,3) {\shortstack{T30 \\ V0}};
+\node[fill={rgb,255:red,255;green,210;blue,210}] at (7,0) {\shortstack{T7 \\ V0}};
+\node[fill={rgb,255:red,255;green,210;blue,210}] at (7,1) {\shortstack{T15 \\ V0}};
+\node[fill={rgb,255:red,255;green,210;blue,210}] at (7,2) {\shortstack{T23 \\ V0}};
+\node[fill={rgb,255:red,255;green,210;blue,210}] at (7,3) {\shortstack{T31 \\ V0}};
+\draw[color=black,thick,shift={(-0.5,-0.5)}] (0,0) grid (8,4);
+
+\node[fill={rgb,255:red,175;green,175;blue,255}] at (0,-2) {\shortstack{T0 \\ V0}};
+\node[fill={rgb,255:red,175;green,255;blue,175}] at (1,-2) {\shortstack{T1 \\ V0}};
+\node[fill={rgb,255:red,255;green,255;blue,175}] at (2,-2) {\shortstack{T2 \\ V0}};
+\node[fill={rgb,255:red,255;green,175;blue,175}] at (3,-2) {\shortstack{T3 \\ V0}};
+\node[fill={rgb,255:red,210;green,210;blue,255}] at (4,-2) {\shortstack{T4 \\ V0}};
+\node[fill={rgb,255:red,210;green,255;blue,210}] at (5,-2) {\shortstack{T5 \\ V0}};
+\node[fill={rgb,255:red,255;green,255;blue,210}] at (6,-2) {\shortstack{T6 \\ V0}};
+\node[fill={rgb,255:red,255;green,210;blue,210}] at (7,-2) {\shortstack{T7 \\ V0}};
+\draw[color=black,thick,shift={(-0.5,-0.5)}] (0,-2) grid (8,-1);
+
+\node at (0,-3) {\Large{\texttt{0}}};
+\node at (1,-3) {\Large{\texttt{1}}};
+\node at (2,-3) {\Large{\texttt{2}}};
+\node at (3,-3) {\Large{\texttt{3}}};
+\node at (4,-3) {\Large{\texttt{4}}};
+\node at (5,-3) {\Large{\texttt{5}}};
+\node at (6,-3) {\Large{\texttt{6}}};
+\node at (7,-3) {\Large{\texttt{7}}};
+\node at (-1,-2) {\Large{\texttt{0}}};
+\node[fill={rgb,255:red,175;green,175;blue,255}] at (-2,0) {\shortstack{T0 \\ V0}};
+\node[fill={rgb,255:red,175;green,175;blue,255}] at (-2,1) {\shortstack{T8 \\ V0}};
+\node[fill={rgb,255:red,175;green,175;blue,255}] at (-2,2) {\shortstack{T16 \\ V0}};
+\node[fill={rgb,255:red,175;green,175;blue,255}] at (-2,3) {\shortstack{T24 \\ V0}};
+\draw[color=black,thick,shift={(-0.5,-0.5)}] (-2,0) grid (-1,4);
+
+\node at (-3,0) {\Large{\texttt{0}}};
+\node at (-3,1) {\Large{\texttt{1}}};
+\node at (-3,2) {\Large{\texttt{2}}};
+\node at (-3,3) {\Large{\texttt{3}}};
+\node at (-2,-1) {\Large{\texttt{0}}};
+\end{tikzpicture}
+\end{document}

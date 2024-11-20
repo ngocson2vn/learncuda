@@ -101,5 +101,7 @@ int main(int argc, char** argv) {
   print_layout(s32xs8);
   printf("\n\n");
 
+  print_latex(s32xs8);
+
   return 0;
 }
