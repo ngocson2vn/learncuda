@@ -4,3 +4,5 @@ main
 .DS_Store
 */.DS_Store
 output.txt
+*.aux
+*.log
