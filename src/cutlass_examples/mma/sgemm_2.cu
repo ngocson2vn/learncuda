@@ -30,6 +30,9 @@
  **************************************************************************************************/
 #include "gemm.h"
 
+#include <cstdio>
+
+#include <cute/layout.hpp>
 #include <cute/tensor.hpp>
 #include <cute/util/debug.hpp>
 
@@ -37,6 +40,184 @@
 #include "cutlass/util/GPU_Clock.hpp"
 
 #include <thrust/device_vector.h>
+
+
+FILE* get_file_ptr() {
+  FILE *fptr;
+  const char* tex_file = "layout.tex";
+  fptr = fopen(tex_file, "w");
+  if(fptr == NULL) {
+    printf("Failed to open %s\n", tex_file);
+    exit(1);
+  }
+
+  return fptr;
+}
+
+// Generic 2D Layout to LaTeX printer
+template <class LayoutA, class TikzColorFn = cute::TikzColor_BWx8>
+CUTE_HOST_DEVICE
+void
+fprint_latex(FILE* os, LayoutA const& layout_a,   // (m,n) -> idx
+                       TikzColorFn color = {})    // lambda(idx) -> tikz color string
+{
+  using namespace cute;
+  CUTE_STATIC_ASSERT_V(rank(layout_a) <= Int<2>{});
+  auto layout = append<2>(layout_a, Layout<_1,_0>{});
+
+  // Header
+  fprintf(os, "\\documentclass[convert]{standalone}\n"
+         "\\usepackage{tikz}\n\n"
+         "\\begin{document}\n"
+         "\\begin{tikzpicture}[x={(0cm,-1cm)},y={(1cm,0cm)},every node/.style={minimum size=1cm, outer sep=0pt}]\n\n");
+
+  // Layout
+  for (int i = 0; i < size<0>(layout); ++i) {
+    for (int j = 0; j < size<1>(layout); ++j) {
+      int idx = layout(i,j);
+      fprintf(os, "\\node[fill=%s] at (%d,%d) {%d};\n",
+              color(idx), i, j, idx);
+    }
+  }
+  // Grid
+  fprintf(os, "\\draw[color=black,thick,shift={(-0.5,-0.5)}] (0,0) grid (%d,%d);\n\n",
+         int(size<0>(layout)), int(size<1>(layout)));
+  // Labels
+  for (int i =  0, j = -1; i < size<0>(layout); ++i) {
+    fprintf(os, "\\node at (%d,%d) {\\Large{\\texttt{%d}}};\n", i, j, i);
+  }
+  for (int i = -1, j =  0; j < size<1>(layout); ++j) {
+    fprintf(os, "\\node at (%d,%d) {\\Large{\\texttt{%d}}};\n", i, j, j);
+  }
+
+  // Footer
+  fprintf(os, "\\end{tikzpicture}\n"
+         "\\end{document}\n");
+}
+
+// MNK MMA Layout to LaTeX TikZ
+template <class LayoutC, class ThrIDC,
+          class LayoutA, class ThrIDA,
+          class LayoutB, class ThrIDB,
+          class TikzColorFn = cute::TikzColor_TV>
+CUTE_HOST_DEVICE
+void
+fprint_latex_mma(FILE* file_ptr, LayoutC const& C, ThrIDC const& TC,  // (m,n) -> (tid,vid)  and  tid -> thr_idx
+                 LayoutA const& A, ThrIDA const& TA,  // (m,k) -> (tid,vid)  and  tid -> thr_idx
+                 LayoutB const& B, ThrIDB const& TB,  // (n,k) -> (tid,vid)  and  tid -> thr_idx
+                 TikzColorFn color = {})              // lambda(thr_idx,val_idx) -> tikz color string
+{
+  using namespace cute;
+  CUTE_STATIC_ASSERT_V(rank(C) == Int<2>{});
+  CUTE_STATIC_ASSERT_V(rank(A) == Int<2>{});
+  CUTE_STATIC_ASSERT_V(rank(B) == Int<2>{});
+
+  assert(size<0>(A) == size<0>(C));
+  assert(size<0>(B) == size<1>(C));
+  assert(size<1>(A) == size<1>(B));
+
+  // Header
+  fprintf(file_ptr,
+          "\\documentclass[convert]{standalone}\n"
+          "\\usepackage{tikz}\n\n"
+          "\\begin{document}\n"
+          "\\begin{tikzpicture}[x={(0cm,-1cm)},y={(1cm,0cm)},every node/.style={minimum size=1cm, outer sep=0pt}]\n\n");
+
+  // C starting at 0,0
+  for (int m = 0; m < size<0>(C); ++m) {
+    for (int n = 0; n < size<1>(C); ++n) {
+      int thrid   = C(m,n) % size(TC);
+      int val_idx = C(m,n) / size(TC);
+      int thr_idx = TC(thrid);
+
+      fprintf(file_ptr, "\\node[fill=%s] at (%d,%d) {\\shortstack{T%d \\\\ V%d}};\n",
+              color(thr_idx, val_idx),
+              m, n,
+              thr_idx, val_idx);
+    }
+  }
+  // Grid
+  fprintf(file_ptr, "\\draw[color=black,thick,shift={(-0.5,-0.5)}] (%d,%d) grid (%d,%d);\n\n",
+          0, 0, int(size<0>(C)), int(size<1>(C)));
+
+  // A starting at 0,-size<1>(A)-1
+  for (int m = 0; m < size<0>(A); ++m) {
+    for (int k = 0; k < size<1>(A); ++k) {
+      int thrid   = A(m,k) % size(TA);
+      int val_idx = A(m,k) / size(TA);
+      int thr_idx = TA(thrid);
+
+      fprintf(file_ptr, "\\node[fill=%s] at (%d,%d) {\\shortstack{T%d \\\\ V%d}};\n",
+              color(thr_idx, val_idx),
+              m, k-1-size<1>(A),
+              thr_idx, val_idx);
+    }
+  }
+  // Grid
+  fprintf(file_ptr, "\\draw[color=black,thick,shift={(-0.5,-0.5)}] (%d,%d) grid (%d,%d);\n\n",
+          0, int(-size<1>(A)-1), int(size<0>(A)), -1);
+  // A labels
+  for (int m =  0, k = -1; m < size<0>(A); ++m) {
+    fprintf(file_ptr, "\\node at (%d,%d) {\\Large{\\texttt{%d}}};\n", m, k-1-size<1>(A), m);
+  }
+  for (int m = -1, k =  0; k < size<1>(A); ++k) {
+    fprintf(file_ptr, "\\node at (%d,%d) {\\Large{\\texttt{%d}}};\n", m, k-1-size<1>(A), k);
+  }
+
+  // B starting at -size<1>(B)-1,0
+  for (int n = 0; n < size<0>(B); ++n) {
+    for (int k = 0; k < size<1>(B); ++k) {
+      int thrid   = B(n,k) % size(TB);
+      int val_idx = B(n,k) / size(TB);
+      int thr_idx = TB(thrid);
+
+      fprintf(file_ptr, "\\node[fill=%s] at (%d,%d) {\\shortstack{T%d \\\\ V%d}};\n",
+             color(thr_idx, val_idx),
+             k-1-size<1>(B), n,
+             thr_idx, val_idx);
+    }
+  }
+  // Grid
+  fprintf(file_ptr, "\\draw[color=black,thick,shift={(-0.5,-0.5)}] (%d,%d) grid (%d,%d);\n\n",
+         int(-size<1>(B)-1), 0, -1, int(size<0>(B)));
+  // B labels
+  for (int n =  0, k = -1; n < size<0>(B); ++n) {
+    fprintf(file_ptr, "\\node at (%d,%d) {\\Large{\\texttt{%d}}};\n", k-1-size<1>(B), n, n);
+  }
+  for (int n = -1, k =  0; k < size<1>(B); ++k) {
+    fprintf(file_ptr, "\\node at (%d,%d) {\\Large{\\texttt{%d}}};\n", k-1-size<1>(B), n, k);
+  }
+
+  // Footer
+  fprintf(file_ptr, 
+          "\\end{tikzpicture}\n"
+          "\\end{document}\n");
+}
+
+// TiledMMA to LaTeX TikZ
+template <class... Args, class TikzColorFn = cute::TikzColor_TV>
+CUTE_HOST_DEVICE
+void
+fprint_latex(FILE* os, cute::TiledMMA<Args...> const& mma,
+             TikzColorFn color = {})             // lambda(thr_idx,val_idx) -> tikz color string
+{
+  using namespace cute;
+  auto layout_and_thrid_C = mma.get_layoutC_MN();
+  auto layoutC_MN = get<0>(layout_and_thrid_C);
+  auto thrID_C    = get<1>(layout_and_thrid_C);
+
+  auto layout_and_thrid_A = mma.get_layoutA_MK();
+  auto layoutA_MK = get<0>(layout_and_thrid_A);
+  auto thrID_A    = get<1>(layout_and_thrid_A);
+
+  auto layout_and_thrid_B = mma.get_layoutB_NK();
+  auto layoutB_NK = get<0>(layout_and_thrid_B);
+  auto thrID_B    = get<1>(layout_and_thrid_B);
+
+  fprint_latex_mma(os, layoutC_MN, thrID_C,
+                   layoutA_MK, thrID_A,
+                   layoutB_NK, thrID_B);
+}
 
 namespace v2 {
 
@@ -108,12 +289,14 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
   ThrCopy thr_copy_a = copy_a.get_slice(threadIdx.x);
   Tensor tAgA = thr_copy_a.partition_S(gA);                            // (CPY,CPY_M,CPY_K,k)
   Tensor tAsA = thr_copy_a.partition_D(sA);                            // (CPY,CPY_M,CPY_K)
+
   // Allocate registers same shape/layout as partitioned data
   Tensor tArA = make_fragment_like(tAsA);                              // (CPY,CPY_M,CPY_K)
 
   ThrCopy thr_copy_b = copy_b.get_slice(threadIdx.x);
   Tensor tBgB = thr_copy_b.partition_S(gB);                            // (CPY,CPY_N,CPY_K,k)
   Tensor tBsB = thr_copy_b.partition_D(sB);                            // (CPY,CPY_N,CPY_K)
+
   // Allocate registers same shape/layout as partitioned data
   Tensor tBrB = make_fragment_like(tBsB);                              // (CPY,CPY_N,CPY_K)
 
@@ -264,7 +447,7 @@ gemm_nt(int m, int n, int k,
   auto dC = make_stride(Int<1>{}, ldC);                      // (dM, dN)
 
   // Define CTA tile sizes (static)
-  auto bM = Int<128>{};
+  auto bM = Int<32>{};
   auto bN = Int<32>{};
   auto bK = Int<8>{};
   auto cta_tiler = make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
@@ -282,11 +465,11 @@ gemm_nt(int m, int n, int k,
   // Use 32x8 of these threads.
 
   TiledCopy copyA = make_tiled_copy(Copy_Atom<UniversalCopy<uint128_t>, TA>{},
-                                    Layout<Shape<_32, _8>>{},  // Thr layout 32x8 m-major
-                                    Layout<Shape<_4, _1>>{}); // Val layout  4x1 m-major
+                                    Layout<Shape<_8, _4>>{},  // Thr layout 32x8 m-major
+                                    Layout<Shape<_4, _2>>{}); // Val layout  4x1 m-major
   TiledCopy copyB = make_tiled_copy(Copy_Atom<UniversalCopy<uint128_t>, TB>{},
-                                    Layout<Shape<_32, _8>>{},  // Thr layout 32x8 n-major
-                                    Layout<Shape<_4, _1>>{}); // Val layout  4x1 n-major
+                                    Layout<Shape<_8, _4>>{},  // Thr layout 32x8 n-major
+                                    Layout<Shape<_4, _2>>{}); // Val layout  4x1 n-major
 
   // TUTORIAL: Construct TiledMMA with a particular MMA_Atom to use and
   //           define the partitioning pattern to apply.
@@ -294,7 +477,10 @@ gemm_nt(int m, int n, int k,
   // Reproduce that atom 16x16x1 times (m-major) across threads so that we use 256 threads.
 
   TiledMMA mmaC = make_tiled_mma(UniversalFMA<TC, TA, TB>{},
-                                 Layout<Shape<_16, _16, _1>>{});  // 16x16x1 UniversalFMA
+                                 Layout<Shape<_8, _4, _1>>{});  // 16x16x1 UniversalFMA
+
+  // print_latex(mmaC);
+  fprint_latex(get_file_ptr(), mmaC);
 
 #if 0
   print(copyA);
@@ -345,8 +531,8 @@ gemm_tn(int m, int n, int k,
   auto dC = make_stride(Int<1>{}, ldC);                      // (dM, dN)
 
   // Define CTA tile sizes (static)
-  auto bM = Int<128>{};
-  auto bN = Int<32>{};
+  auto bM = Int<32>{};
+  auto bN = Int<8>{};
   auto bK = Int<8>{};
   auto cta_tiler = make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
 
@@ -363,10 +549,10 @@ gemm_tn(int m, int n, int k,
   // Use 32x8 of these threads arranged in k-major.
 
   TiledCopy copyA = make_tiled_copy(Copy_Atom<UniversalCopy<TA>, TA>{},
-                                    Layout<Shape<_32, _8>, Stride<_8, _1>>{}, // Thr layout 32x8 k-major
+                                    Layout<Shape<_8, _4>, Stride<_4, _1>>{}, // Thr layout 32x8 k-major
                                     Layout<Shape<_1, _1>>{});              // Val layout  1x1
   TiledCopy copyB = make_tiled_copy(Copy_Atom<UniversalCopy<TB>, TB>{},
-                                    Layout<Shape<_32, _8>, Stride<_8, _1>>{}, // Thr layout 32x8 k-major
+                                    Layout<Shape<_8, _4>, Stride<_4, _1>>{}, // Thr layout 32x8 k-major
                                     Layout<Shape<_1, _1>>{});              // Val layout  1x1
 
   // TUTORIAL: Construct TiledMMA to define the MMA_Atom to use and the
@@ -375,7 +561,7 @@ gemm_tn(int m, int n, int k,
   // Reproduce that atom 16x16x1 times (m-major) across threads so that we use 256 threads.
 
   TiledMMA mmaC = make_tiled_mma(UniversalFMA<TC, TA, TB>{},
-                                 Layout<Shape<_16, _16, _1>>{});  // 16x16x1 TiledMMA
+                                 Layout<Shape<_8, _4, _1>>{});  // 16x16x1 TiledMMA
 
 #if 0
   print(copyA);

@@ -65,15 +65,15 @@ T* matmul_nt_cpu(T* MatA, const int sizeA, const int ldA, T* MatB, const int siz
 }
 
 int main(int argc, char** argv) {
-  int m = 16;
+  int m = 32;
   if (argc >= 2)
     sscanf(argv[1], "%d", &m);
 
-  int n = 16;
+  int n = 32;
   if (argc >= 3)
     sscanf(argv[2], "%d", &n);
 
-  int k = 4;
+  int k = 8;
   if (argc >= 4)
     sscanf(argv[3], "%d", &k);
 
@@ -159,23 +159,23 @@ int main(int argc, char** argv) {
   //==============================================================
   // v2
   //==============================================================
-  // thrust::host_vector<TC> h_C_v2(m*n);
-  // for (int j = 0; j < m*n; ++j) h_C_v2[j] = static_cast<TC>(0.0);
-  // printf("\n");
-  // print_mat("h_C_v2 BEFORE", h_C_v2.data(), dim3(m, n, 1));
-  // printf("\n");
+  thrust::host_vector<TC> h_C_v2(m*n);
+  for (int j = 0; j < m*n; ++j) h_C_v2[j] = static_cast<TC>(0.0);
+  printf("\n");
+  print_mat("h_C_v2 BEFORE", h_C_v2.data(), dim3(m, n, 1));
+  printf("\n");
 
-  // printf("\n");
-  // v2::test_mma_v2(transA, transB, m, n, k,
-  //      alpha,
-  //      h_A, ldA,
-  //      h_B, ldB,
-  //      beta,
-  //      h_C_v2, ldC);
+  printf("\n");
+  v2::test_mma_v2(transA, transB, m, n, k,
+       alpha,
+       h_A, ldA,
+       h_B, ldB,
+       beta,
+       h_C_v2, ldC);
 
-  // printf("\n");
-  // print_mat("h_C_v2 AFTER", h_C_v2.data(), dim3(m, n, 1));
-  // printf("\n");
+  printf("\n");
+  print_mat("h_C_v2 AFTER", h_C_v2.data(), dim3(m, n, 1));
+  printf("\n");
 
   return 0;
 }
