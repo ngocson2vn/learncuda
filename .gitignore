@@ -1,5 +1,8 @@
+main
+*.o
 .vscode/vc.*
 .DS_Store
 */.DS_Store
-main
-*.o
+output.txt
+*.aux
+*.log
