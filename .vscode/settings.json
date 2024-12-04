@@ -56,7 +56,10 @@
     "set": "cpp",
     "unordered_map": "cpp",
     "unordered_set": "cpp",
-    "iosfwd": "cpp"
+    "iosfwd": "cpp",
+    "initializer_list": "cpp",
+    "queue": "cpp",
+    "stack": "cpp"
   },
   "C_Cpp.errorSquiggles": "disabled"
 }
