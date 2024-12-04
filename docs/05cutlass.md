@@ -117,3 +117,11 @@ console.log(composedFunction(3)); // Output: 7
 3. **Signal Processing**: Apply transformations and filters to signals.
 4. **Machine Learning Pipelines**: Combine feature extraction, data preprocessing, and model inference.
 
+
+# WGMMA
+In the CUTLASS paradigm for MMA, the `cute::gemm` method is designed to expose architecture-specific MMA instructions via a uniform interface. (Indeed, if you examine the SM80 tutorial GEMM kernel, you’ll see that the `cute::gemm` call there is syntactically identical to that given above.) However, the definitions of the arguments involved in the cute::gemm call involve many WGMMA-specific aspects:
+
+- The definition of the `TiledMMA` object `tiled_mma` encapsulates the information needed for `cute::gemm` to dispatch to a specific `wgmma` PTX instruction.
+- The layouts of the SMEM tensors `sA` and `sB` must be defined to be compatible with `wgmma`.
+- The fragments `tCrA`, `tCrB`, and `tCrC` are constructed as thread-level partitions of the data using the `TiledMMA` object, and as such have WGMMA-specific layouts that the programmer should be aware of.
+- The fragments `tCrA` (if sourcing operand `A` from SMEM) and `tCrB` aren't register-backed tensors whose values are copied from SMEM, but rather matrix descriptors constructed on top of SMEM.
