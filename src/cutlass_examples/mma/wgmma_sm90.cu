@@ -47,6 +47,8 @@
 #include "cutlass/arch/mma_sm90.h"
 #include "cutlass/device_kernel.h"
 
+#include "fprint_mat.h"
+
 using namespace cute;
 
 template <class ElementA,
@@ -140,6 +142,9 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
   //
 
   auto K_PIPE_MAX = size<1>(tAsA);
+  if (thread0()) {
+    printf("K_PIPE_MAX = %ld\n", (int)K_PIPE_MAX);
+  }
 
   // Total count of tiles
   int k_tile_count = size<1>(tAgA);
@@ -496,18 +501,22 @@ int main(int argc, char** argv)
   thrust::host_vector<TC> h_C(m*n);
 
   // Initialize the tensors
-  for (int j = 0; j < m*k; ++j) h_A[j] = TA(int((rand() % 2) ? 1 : -1));
-  for (int j = 0; j < n*k; ++j) h_B[j] = TB(int((rand() % 2) ? 1 : -1));
+  // for (int j = 0; j < m*k; ++j) h_A[j] = TA(int((rand() % 2) ? 1 : -1));
+  // for (int j = 0; j < n*k; ++j) h_B[j] = TB(int((rand() % 2) ? 1 : -1));
+  for (int j = 0; j < m*k; ++j) h_A[j] = TA(0.25);
+  for (int j = 0; j < n*k; ++j) h_B[j] = TB(2.0);
   for (int j = 0; j < m*n; ++j) h_C[j] = TC(0);
+
+  FILE* file_ptr = get_file_ptr("output.txt");
+  fprint_mat(file_ptr, "h_A", h_A.data(), dim3(m, k, 1));
+  fprintf(file_ptr, "\n\n");
+
+  fprint_mat(file_ptr, "h_B", h_B.data(), dim3(n, k, 1));
+  fprintf(file_ptr, "\n\n");
 
   thrust::device_vector<TA> d_A = h_A;
   thrust::device_vector<TB> d_B = h_B;
   thrust::device_vector<TC> d_C = h_C;
-
-  double gflops = (2.0*m*n*k) * 1e-9;
-
-  const int timing_iterations = 100;
-  GPU_Clock timer;
 
   int ldA = 0, ldB = 0, ldC = m;
 
@@ -538,25 +547,32 @@ int main(int argc, char** argv)
   CUTE_CHECK_LAST();
   thrust::host_vector<TC> cute_result = d_C;
 
+  fprint_mat(file_ptr, "cute_result", cute_result.data(), dim3(m, n, 1));
+
   // Timing iterations
-  timer.start();
-  for (int i = 0; i < timing_iterations; ++i) {
-    gemm(transA, transB, m, n, k,
-         alpha,
-         d_A.data().get(), ldA,
-         d_B.data().get(), ldB,
-         beta,
-         d_C.data().get(), ldC);
-  }
-  double cute_time = timer.seconds() / timing_iterations;
-  CUTE_CHECK_LAST();
-  printf("CUTE_GEMM:     [%6.1f]GFlop/s  (%6.4f)ms\n", gflops / cute_time, cute_time*1000);
+  // double gflops = (2.0*m*n*k) * 1e-9;
+
+  // const int timing_iterations = 100;
+  // GPU_Clock timer;
+  // timer.start();
+  // for (int i = 0; i < timing_iterations; ++i) {
+  //   gemm(transA, transB, m, n, k,
+  //        alpha,
+  //        d_A.data().get(), ldA,
+  //        d_B.data().get(), ldB,
+  //        beta,
+  //        d_C.data().get(), ldC);
+  // }
+  // double cute_time = timer.seconds() / timing_iterations;
+  // CUTE_CHECK_LAST();
+  // printf("CUTE_GEMM:     [%6.1f]GFlop/s  (%6.4f)ms\n", gflops / cute_time, cute_time*1000);
 
 #else
 
   std::cout << "CUTLASS_ARCH_MMA_SM90_SUPPORTED must be enabled, but it is not. Test is waived \n" << std::endl;
 #endif
 
- return 0;
+  printf("Output file: output.txt\n");
+  return 0;
 
 }

@@ -125,3 +125,6 @@ In the CUTLASS paradigm for MMA, the `cute::gemm` method is designed to expose a
 - The layouts of the SMEM tensors `sA` and `sB` must be defined to be compatible with `wgmma`.
 - The fragments `tCrA`, `tCrB`, and `tCrC` are constructed as thread-level partitions of the data using the `TiledMMA` object, and as such have WGMMA-specific layouts that the programmer should be aware of.
 - The fragments `tCrA` (if sourcing operand `A` from SMEM) and `tCrB` aren't register-backed tensors whose values are copied from SMEM, but rather matrix descriptors constructed on top of SMEM.
+
+## MMA Atom: `MMA_64x64x16_F16F16F16_SS`
+cutlass/include/cute/arch/mma_sm90_gmma.hpp
