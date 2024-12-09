@@ -55,6 +55,9 @@ In NVIDIA **CuTe** (C++ templates for tensor computation), the concepts of **coo
 Understanding these spaces is crucial when implementing or optimizing tensor operations, as transformations between coordinate space and index space affect both **logical correctness** and **performance**.
 
 # CuTe Layout Algebra
+Functional composition of Layouts is the core of CuTe and is used in just about every higher-level operation.  
+<br/>
+
 In computer science, **functional composition** refers to the process of combining two or more functions to produce a new function. The output of one function becomes the input of the next. This concept is rooted in mathematics and is widely used in programming, especially in functional programming paradigms.
 
 ### Notation in Mathematics
@@ -128,3 +131,45 @@ In the CUTLASS paradigm for MMA, the `cute::gemm` method is designed to expose a
 
 ## MMA Atom: `MMA_64x64x16_F16F16F16_SS`
 cutlass/include/cute/arch/mma_sm90_gmma.hpp
+
+# Swizzle and Layout Composition
+https://research.colfax-intl.com/tutorial-matrix-transpose-in-cutlass/
+
+## Swizzle
+https://en.wikipedia.org/wiki/Swizzling_(computer_graphics)
+In computer graphics, swizzles are a class of operations that **transform vectors by rearranging components**.
+In terms of linear algebra, this is equivalent to multiplying by a matrix whose rows are standard basis vectors. If $A = (1, 2, 3, 4)^T$, then swizzling $A$ as above looks like
+$$
+A.wwxy = 
+\begin{bmatrix}
+0 & 0 & 0 & 1 \\
+0 & 0 & 0 & 1 \\
+1 & 0 & 0 & 0 \\
+0 & 1 & 0 & 0
+\end{bmatrix}
+\begin{bmatrix}
+1 \\
+2 \\
+3 \\
+4
+\end{bmatrix}
+=
+\begin{bmatrix}
+4 \\
+4 \\
+1 \\
+2
+\end{bmatrix}
+$$
+
+https://github.com/NVIDIA/cutlass/issues/1018
+
+## GMMA::Layout_MN_SW128_Atom<TA>
+cutlass/include/cute/atom/mma_traits_sm90_gmma.hpp
+```C++
+using Layout_MN_SW128_Atom_Bits = ComposedLayout<Swizzle<3,4,3>, smem_ptr_flag, Layout<Shape<_1024,_8>,Stride<_1,_1024>>>;
+
+template <class Type>
+using Layout_MN_SW128_Atom = decltype(upcast<sizeof_bits<Type>::value>(Layout_MN_SW128_Atom_Bits{}));
+```
+

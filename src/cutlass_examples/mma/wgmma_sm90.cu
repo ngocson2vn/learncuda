@@ -294,7 +294,13 @@ gemm_nt(int m, int n, int k,
   auto bP = Int<  3>{};  // Pipeline
 
   // Define the smem layouts (static)
+  /*
+  GMMA::Layout_MN_SW128_Atom<TA> expands to
+  using cute::SM90::GMMA::Layout_MN_SW128_Atom<TA> = cute::ComposedLayout<cute::Swizzle<3, 4, 3>, cute::smem_ptr_flag_bits<16>, cute::Layout<cute::Shape<cute::_64, cute::_8>, cute::Stride<cute::_1, cute::_64>>> 
+  */
   auto sA = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TA>{}, make_shape(bM,bK,bP));
+  cute::print(sA);
+
   auto sB = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TB>{}, make_shape(bN,bK,bP));
 
   // Define the MMA

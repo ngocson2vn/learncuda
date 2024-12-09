@@ -59,7 +59,12 @@
     "iosfwd": "cpp",
     "initializer_list": "cpp",
     "queue": "cpp",
-    "stack": "cpp"
+    "stack": "cpp",
+    "optional": "cpp",
+    "system_error": "cpp",
+    "__node_handle": "cpp",
+    "algorithm": "cpp",
+    "__memory": "cpp"
   },
   "C_Cpp.errorSquiggles": "disabled"
 }

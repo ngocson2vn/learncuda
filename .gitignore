@@ -1,5 +1,6 @@
 main
 hopper
+test
 *.o
 .vscode/vc.*
 .DS_Store

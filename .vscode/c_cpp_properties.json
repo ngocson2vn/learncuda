@@ -10,7 +10,8 @@
                 "${workspaceFolder}/src/**"
             ],
             "defines": [
-                "GOOGLE_CUDA"
+                "GOOGLE_CUDA",
+                "CUTLASS_ARCH_MMA_SM90_SUPPORTED"
             ],
             "compilerPath": "/usr/bin/gcc",
             "cStandard": "c11",
