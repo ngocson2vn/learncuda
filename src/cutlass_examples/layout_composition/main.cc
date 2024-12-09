@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
     return color(0);
   };
 
-  util::print_latex(a, color_fn);
+  util::fprint_latex(a, color_fn);
 
   // // Identical to
   // auto same_r = make_layout(composition(layout<0>(a), get<0>(tiler)),
