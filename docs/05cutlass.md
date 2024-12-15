@@ -173,3 +173,5 @@ template <class Type>
 using Layout_MN_SW128_Atom = decltype(upcast<sizeof_bits<Type>::value>(Layout_MN_SW128_Atom_Bits{}));
 ```
 
+# Domain, Range, and Codomain
+https://sookocheff.com/post/fp/domain-range-codomain/

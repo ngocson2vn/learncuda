@@ -64,7 +64,8 @@
     "system_error": "cpp",
     "__node_handle": "cpp",
     "algorithm": "cpp",
-    "__memory": "cpp"
+    "__memory": "cpp",
+    "ranges": "cpp"
   },
   "C_Cpp.errorSquiggles": "disabled"
 }

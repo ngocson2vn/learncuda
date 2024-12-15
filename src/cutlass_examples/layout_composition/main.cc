@@ -1,6 +1,6 @@
 #include <cstdio>
 
-#include "print_latex.h"
+#include "util/print_latex.h"
 
 using namespace cute;
 
