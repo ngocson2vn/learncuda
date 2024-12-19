@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <bitset>
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 #include <device_launch_parameters.h>
@@ -78,11 +79,12 @@ int main(int argc, char** argv) {
 
   // Initialize the tensors
   int32_t val = 1;
-  int32_t mask = 1;
+  int32_t rep = val;
   for (int i = 0; i < 3; i++) {
-    mask = mask << 8;
-    val = val | mask;
+    rep = rep << 8;
+    val = val | rep;
   }
+  fprintf(stdout, "val: %s\n\n", std::bitset<32>(val).to_string().c_str());
 
   for (int j = 0; j < m*k; ++j) h_A[j] = int32_t(val);
   for (int j = 0; j < n*k; ++j) h_B[j] = int32_t(val);
