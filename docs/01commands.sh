@@ -72,3 +72,9 @@ dpkg -i nvidia-fabricmanager-550_550.54.15-1_amd64.deb
 4. Start Fabric manager
 sudo systemctl status nvidia-fabricmanager
 sudo systemctl start nvidia-fabricmanager
+
+########################################################################################################################
+# NVCC
+########################################################################################################################
+# Generate ptx
+nvcc -keep
