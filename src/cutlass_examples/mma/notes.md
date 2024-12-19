@@ -47,4 +47,9 @@ The kernel now has tiles of shared memory copied in from global memory. We now w
   // Define thread layouts (static)
   auto tC = make_layout(make_shape(Int<16>{}, Int<16>{}));   // (m,n) -> thr_idx; m-major
 ```
-This is a m-major 16x16 layout of threads which will be used to partition a 128x128 tile of C-data, resulting in each thread computing its own 8x8 subtensor of `gC`.
+This is a m-major 16x16 layout of threads which will be used to partition a 128x128 tile of C-data, resulting in each thread computing its own 8x8 subtensor of `gC`. <br/><br/>
+
+
+# wgmma_sm90.cu
+
+## TMA operations

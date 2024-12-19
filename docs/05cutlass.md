@@ -1,3 +1,13 @@
+# References
+https://research.colfax-intl.com/cutlass-tutorial-wgmma-hopper/
+
+https://github.com/NVIDIA/cutlass/blob/main/media/docs/efficient_gemm.md
+
+Extended Asm:  
+https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html
+
+https://www.ibiblio.org/gferg/ldp/GCC-Inline-Assembly-HOWTO.html
+
 # Layout
 A Layout is a tuple of (`Shape`, `Stride`). Semantically, it implements a mapping from any coordinate within the `Shape` to an index via the `Stride`.
 
