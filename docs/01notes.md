@@ -390,3 +390,8 @@ CUDA threads can use a small amount of scratchpad "shared" memory, that is locat
 Which bank is used for a given memory access is determined by the number of banks, size of each bank and finally the memory address. For modern CUDA architectures, bank size is usually 4 bytes (https://docs.nvidia.com/cuda/pascal-tuning-guide/index.html#shared-memory-bandwidth) and there are 32 banks, one for each thread in a warp. Banks are assigned to addresses sequentially, according to this formula: bank = (address / 4) % 32. Therefore address 1024 goes to bank 0, 1028 goes to bank 1 etc.
 
 This means that if 32 threads access 32 4-byte shared memory locations at once, the access can proceed completely in parallel if they use all 32 memory banks. However, if multiple threads use the same memory bank, those accesses will be effectively serialized. This is called a bank conflict. In the worst case, if all threads use the same memory bank, the memory accesses could take up to 32x longer. There is however an exception to this when multiple threads read from the exact same address (which implies that they use the same memory bank). In this case only one bank access will be generated, the value will be broadcasted to all of the threads and the bank conflict will be avoided.
+
+# Asynchronous Barrier
+https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#asynchronous-barrier
+
+## Temporal Splitting and Five Stages of Synchronization
