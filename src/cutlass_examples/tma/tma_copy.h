@@ -57,24 +57,31 @@ __global__ static void __launch_bounds__(kNumThreads, 1)
     copyTMAKernel(CUTE_GRID_CONSTANT Params const params) {
   using namespace cute;
 
-  printf("blockIdx.x %d threadIdx.x %d starts copyTMAKernel\n", blockIdx.x, threadIdx.x);
-  //
-  // Get layouts and tiled copies from Params struct
-  //
   using GmemLayout = typename Params::GmemLayout;
   using SmemLayout = typename Params::SmemLayout;
   using TileShape = typename Params::TileShape;
-
-  auto &tmaLoad = params.tmaLoad;
-  auto &tmaStore = params.tmaStore;
-  auto &gmemLayout = params.gmemLayout;
-  auto &smemLayout = params.smemLayout;
-  auto &tileShape = params.tileShape;
 
   // Use Shared Storage structure to allocate aligned SMEM addresses.
   extern __shared__ char shared_memory[];
   using SharedStorage = SharedStorageTMA<Element, SmemLayout>;
   SharedStorage &shared_storage = *reinterpret_cast<SharedStorage*>(shared_memory);
+
+  if (blockIdx.x + blockIdx.y + blockIdx.z == 0 && threadIdx.x == 0) {
+    printf("sizeof(SharedStorageTMA<Element, SmemLayout>): %ld\n", sizeof(SharedStorageTMA<Element, SmemLayout>));
+    printf("sizeof(shared_storage.smem): %ld\n", sizeof(shared_storage.smem));
+    printf("sizeof(shared_storage.mbarrier): %ld\n", sizeof(shared_storage.mbarrier));
+    printf("\n\n");
+  }
+
+  // printf("blockIdx.x %d threadIdx.x %d starts copyTMAKernel\n", blockIdx.x, threadIdx.x);
+  //
+  // Get layouts and tiled copies from Params struct
+  //
+  auto &tmaLoad = params.tmaLoad;
+  auto &tmaStore = params.tmaStore;
+  auto &gmemLayout = params.gmemLayout;
+  auto &smemLayout = params.smemLayout;
+  auto &tileShape = params.tileShape;
 
   // Define smem tensor
   Tensor sS = make_tensor(make_smem_ptr(shared_storage.smem.data()), smemLayout);
@@ -127,7 +134,7 @@ __global__ static void __launch_bounds__(kNumThreads, 1)
   }
   // cute::tma_store_wait<0>();
 
-  printf("blockIdx.x %d threadIdx.x %d finishes copyTMAKernel\n", blockIdx.x, threadIdx.x);
+  // printf("blockIdx.x %d threadIdx.x %d finishes copyTMAKernel\n", blockIdx.x, threadIdx.x);
 }
 
 

@@ -65,7 +65,10 @@
     "__node_handle": "cpp",
     "algorithm": "cpp",
     "__memory": "cpp",
-    "ranges": "cpp"
+    "ranges": "cpp",
+    "__cccl_config": "cpp",
+    "__target_macros": "cpp",
+    "__preprocessor": "cpp"
   },
   "C_Cpp.errorSquiggles": "disabled"
 }

@@ -80,6 +80,8 @@ int main(int argc, char** argv) {
   thrust::host_vector<float> h_data(kThreads);
   for (int i = 0; i < kThreads; i++) h_data[i] = i;
 
+  device_init(0);
+
   thrust::device_vector<float> d_data = h_data;
   dim3 grid_dim(1);
   dim3 block_dim(kThreads);

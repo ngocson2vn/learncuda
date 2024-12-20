@@ -111,9 +111,8 @@ int main(int argc, char** argv) {
   
   // Copy output matrix
   h_D = d_D;
+  CUDA_CHECK_ERROR(cudaDeviceSynchronize());
 
   fprintf(stdout, "\n\n");
   fprint_mat(stdout, "h_D", h_D.data(), dim3(m, n, 1));
-
-  CUDA_CHECK_ERROR(cudaDeviceSynchronize());
 }

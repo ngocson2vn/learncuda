@@ -15,13 +15,13 @@ LDLIBS=-lcuda
 
 .SUFFIXES: .o .cu
 
-default: clean main
+default: clean main1
 
-main: main.o
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main.o $(LDLIBS)
+main1: main1.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main1.o $(LDLIBS)
 
-main.o: main.cu
-	$(CXX) -c $(CXXFLAGS) -o "$@" main.cu
+main1.o: main1.cu
+	$(CXX) -c $(CXXFLAGS) -o "$@" main1.cu
 
 clean: 
-	rm -f $(OBJECTS) $(APP)
+	rm -f *.o main1
