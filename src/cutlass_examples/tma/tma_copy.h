@@ -57,6 +57,7 @@ __global__ static void __launch_bounds__(kNumThreads, 1)
     copyTMAKernel(CUTE_GRID_CONSTANT Params const params) {
   using namespace cute;
 
+  printf("threadIdx.x %d starts copyTMAKernel\n");
   //
   // Get layouts and tiled copies from Params struct
   //
@@ -125,6 +126,8 @@ __global__ static void __launch_bounds__(kNumThreads, 1)
     // cute::tma_store_arrive();
   }
   // cute::tma_store_wait<0>();
+
+  printf("threadIdx.x %d finishes copyTMAKernel\n");
 }
 
 template <int TILE_M = 128, int TILE_N = 128, int THREADS = 32>
