@@ -60,7 +60,7 @@ __global__ void add_one_kernel(int* data)
     init(&bar, blockDim.x);                      // a)
     ptx::fence_proxy_async(ptx::space_shared);   // b)
   }
-  __syncthreads();
+  __syncthreads(); // Ensure that the barrier object is really initialized.
 
   // 2. Initiate TMA transfer to copy global to shared memory.
   if (threadIdx.x == 0) {

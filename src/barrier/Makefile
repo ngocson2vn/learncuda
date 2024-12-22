@@ -2,8 +2,8 @@ NVCC = /usr/local/cuda/bin/nvcc
 CUDA_INCLUDE = /usr/local/cuda/include
 
 
-NVCC_FLAGS = -std=c++17 -g -O0
-# NVCC_FLAGS += -keep
+NVCC_FLAGS = -v -std=c++17 -g -O0
+NVCC_FLAGS += -keep
 NVCC_FLAGS += --compiler-options=-fno-inline --expt-relaxed-constexpr
 NVCC_FLAGS += --disable-warnings
 NVCC_FLAGS += -gencode arch=compute_75,code=sm_75

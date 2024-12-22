@@ -4,153 +4,25 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
-        {
-            "name": "cute_tuple",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/src/cutlass_examples/tuple/main",
-            "cwd": "${workspaceFolder}/src/cutlass_examples/tuple",
-            "args": [],
-            "stopAtEntry": true,
-            "environment": [
-                {
-                    "name": "TF_CPP_MAX_VLOG_LEVEL",
-                    "value": "0"
-                },
-                {
-                    "name": "CUDA_VISIBLE_DEVICES",
-                    "value": "0"
-                }
-            ],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "miDebuggerArgs": "-x '${workspaceFolder}/gdb.conf'",
-            "linux": {
-                "sourceFileMap": {
-                    "/data00/home/son.nguyen/workspace/git/learncuda": {
-                        "editorPath": "${workspaceFolder}",
-                        "useForBreakpoints": true
-                    }
-                }
-            },
-            "setupCommands": [
-                {
-                    "description": "",
-                    //Configure the search path of the code file here, such as the path where the workspace can be configured in the blade project
-                    "text": "directory ${workspaceFolder}"
-                }
-            ]
-        },
-        {
-            "name": "cute_layout",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/src/cutlass_examples/layout_composition/main",
-            "cwd": "${workspaceFolder}/src/cutlass_examples/layout_composition",
-            "args": [],
-            "stopAtEntry": true,
-            "environment": [
-                {
-                    "name": "TF_CPP_MAX_VLOG_LEVEL",
-                    "value": "0"
-                },
-                {
-                    "name": "CUDA_VISIBLE_DEVICES",
-                    "value": "0"
-                }
-            ],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "miDebuggerArgs": "-x '${workspaceFolder}/gdb.conf'",
-            "linux": {
-                "sourceFileMap": {
-                    "/data00/home/son.nguyen/workspace/git/learncuda": {
-                        "editorPath": "${workspaceFolder}",
-                        "useForBreakpoints": true
-                    }
-                }
-            },
-            "setupCommands": [
-                {
-                    "description": "",
-                    //Configure the search path of the code file here, such as the path where the workspace can be configured in the blade project
-                    "text": "directory ${workspaceFolder}"
-                }
-            ]
-        },
-        {
-            "name": "layout_tile_to_shape",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/src/cutlass_examples/layout_tile_to_shape/main",
-            "cwd": "${workspaceFolder}/src/cutlass_examples/layout_tile_to_shape",
-            "args": [],
-            "stopAtEntry": true,
-            "environment": [
-                {
-                    "name": "TF_CPP_MAX_VLOG_LEVEL",
-                    "value": "0"
-                },
-                {
-                    "name": "CUDA_VISIBLE_DEVICES",
-                    "value": "0"
-                }
-            ],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "miDebuggerArgs": "-x '${workspaceFolder}/gdb.conf'",
-            "linux": {
-                "sourceFileMap": {
-                    "/data00/home/son.nguyen/workspace/git/learncuda": {
-                        "editorPath": "${workspaceFolder}",
-                        "useForBreakpoints": true
-                    }
-                }
-            },
-            "setupCommands": [
-                {
-                    "description": "",
-                    //Configure the search path of the code file here, such as the path where the workspace can be configured in the blade project
-                    "text": "directory ${workspaceFolder}"
-                }
-            ]
-        },
-        {
-            "name": "cute_mma",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/src/cutlass_examples/mma/test",
-            "cwd": "${workspaceFolder}/src/cutlass_examples/mma",
-            "args": [],
-            "stopAtEntry": true,
-            "environment": [
-                {
-                    "name": "TF_CPP_MAX_VLOG_LEVEL",
-                    "value": "0"
-                },
-                {
-                    "name": "CUDA_VISIBLE_DEVICES",
-                    "value": "0"
-                }
-            ],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "miDebuggerArgs": "-x '${workspaceFolder}/gdb.conf'",
-            "linux": {
-                "sourceFileMap": {
-                    "/data00/home/son.nguyen/workspace/git/learncuda": {
-                        "editorPath": "${workspaceFolder}",
-                        "useForBreakpoints": true
-                    }
-                }
-            },
-            "setupCommands": [
-                {
-                    "description": "",
-                    //Configure the search path of the code file here, such as the path where the workspace can be configured in the blade project
-                    "text": "directory ${workspaceFolder}"
-                }
-            ]
-        }
+    {
+      "name": "cuda_tma",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cuda_tma/main2",
+      "cwd": "${workspaceFolder}/src/cuda_tma",
+      "args": [],
+      "stopAtEntry": true,
+      "environment": [
+          {
+              "name": "TF_CPP_MAX_VLOG_LEVEL",
+              "value": "0"
+          },
+          {
+              "name": "CUDA_VISIBLE_DEVICES",
+              "value": "0"
+          }
+      ],
+      "miDebuggerArgs": "-x '${workspaceFolder}/gdb.conf'"
+    }
   ]
 }

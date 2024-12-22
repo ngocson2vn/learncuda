@@ -68,7 +68,10 @@
     "ranges": "cpp",
     "__cccl_config": "cpp",
     "__target_macros": "cpp",
-    "__preprocessor": "cpp"
+    "__preprocessor": "cpp",
+    "__debug": "cpp",
+    "version": "cpp",
+    "complex": "cpp"
   },
   "C_Cpp.errorSquiggles": "disabled"
 }
