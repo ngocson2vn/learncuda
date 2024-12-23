@@ -148,7 +148,7 @@ __global__ void tma_kernel(const __grid_constant__ CUtensorMap tensor_map, int x
   // Symbolically modify a value in shared memory.
   const int k = SMEM_HEIGHT * SMEM_WIDTH / blockDim.x;
   for (int i = 0; i < k; i++) {
-    smem_buffer[threadIdx.x * k + i] = threadIdx.x;
+    smem_buffer[threadIdx.x * k + i] = threadIdx.x + y;
   }
 
   // Wait for shared memory writes to be visible to TMA engine.
@@ -159,26 +159,22 @@ __global__ void tma_kernel(const __grid_constant__ CUtensorMap tensor_map, int x
   if (threadIdx.x == 0) {
     cp_async_bulk_tensor_2d_shared_to_global(&tensor_map, x, y, &smem_buffer);
 
-    // Wait for TMA transfer to have finished reading shared memory.
+    // Ref1: https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#completion-mechanisms-for-asynchronous-copy-operations
+    // Ref2: https://docs.nvidia.com/cuda/parallel-thread-execution/#data-movement-and-conversion-instructions-cp-async-bulk-commit-group
     // Create a "bulk async-group" out of the previous bulk copy operation.
+    // Purpose: for tracking the completion of this group
     cp_async_bulk_commit_group();
 
-    // Wait for the group to have completed reading from shared memory.
+    // Wait for all the asynchronous operations belonging to the bulk async-group are complete.
+    // `0` means the executing thread waits on all the prior bulk async-groups to complete.
     cp_async_bulk_wait_group_read<0>();
-  }
-
-  // Destroy barrier. This invalidates the memory region of the barrier. If
-  // further computations were to take place in the tma_kernel, this allows the
-  // memory location of the shared memory barrier to be reused.
-  if (threadIdx.x == 0) {
-    (&bar)->~barrier();
   }
 }
 
 
 int main(int argc, char** argv) {
-  constexpr int GMEM_HEIGHT = 128;
-  constexpr int GMEM_WIDTH = 128;
+  constexpr int GMEM_HEIGHT = 64;
+  constexpr int GMEM_WIDTH = 64;
   constexpr int SMEM_HEIGHT = 32;
   constexpr int SMEM_WIDTH = 32;
   constexpr int kDataSize = GMEM_HEIGHT * GMEM_WIDTH;
@@ -264,7 +260,20 @@ int main(int argc, char** argv) {
     config.attrs = attribute;
     config.numAttrs = 1;
 
-    CUDA_CHECK_ERROR(cudaLaunchKernelEx(&config, tma_kernel<SMEM_HEIGHT, SMEM_WIDTH, int>, tensor_map, 0, 0));
+    int x = 0;
+    int y = 0;
+    CUDA_CHECK_ERROR(cudaLaunchKernelEx(&config, tma_kernel<SMEM_HEIGHT, SMEM_WIDTH, int>, tensor_map, x, y));
+
+    x = SMEM_HEIGHT;
+    CUDA_CHECK_ERROR(cudaLaunchKernelEx(&config, tma_kernel<SMEM_HEIGHT, SMEM_WIDTH, int>, tensor_map, x, y));
+
+    x = 0;
+    y = SMEM_WIDTH;
+    CUDA_CHECK_ERROR(cudaLaunchKernelEx(&config, tma_kernel<SMEM_HEIGHT, SMEM_WIDTH, int>, tensor_map, x, y));
+
+    x = SMEM_HEIGHT;
+    y = SMEM_WIDTH;
+    CUDA_CHECK_ERROR(cudaLaunchKernelEx(&config, tma_kernel<SMEM_HEIGHT, SMEM_WIDTH, int>, tensor_map, x, y));
   }
 
   thrust::host_vector<int> h_result = d_data;

@@ -58,13 +58,16 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const dim3& dims) {
 
 template<>
 void fprint_mat<int>(FILE* file_ptr, const char* name, int* a, const dim3& dims) {
+  constexpr int digits = 3;
+  std::string format = " %" + std::to_string(digits) + "d";
+
   // Header
   fprintf(file_ptr, "%s\n", name);
-  int num_chars = 8 + 11 * dims.y;
+  int num_chars = 8 + (digits + 1) * dims.y;
   fprintf(file_ptr, "%s\n", std::string(num_chars, '-').c_str());
   fprintf(file_ptr, "      j:");
   for (size_t j = 0; j < dims.y; j++) {
-    fprintf(file_ptr, " %10d", j);
+    fprintf(file_ptr, format.c_str(), j);
   }
   fprintf(file_ptr, "\n%s\n", std::string(num_chars, '-').c_str());
 
@@ -72,9 +75,10 @@ void fprint_mat<int>(FILE* file_ptr, const char* name, int* a, const dim3& dims)
   for (size_t i = 0; i < dims.x; i++) {
     fprintf(file_ptr, "i = %3d:", i);
     for (size_t j = 0; j < dims.y; j++) {
-      fprintf(file_ptr, " %10d", a[i + j * dims.x]);
+      fprintf(file_ptr, format.c_str(), a[i + j * dims.x]);
       if (j == kMaxElement && j < dims.y) {
-        fprintf(file_ptr, " ... %10d", a[i + (dims.y - 1) * dims.x]);
+        format = " ..." + format;
+        fprintf(file_ptr, format.c_str(), a[i + (dims.y - 1) * dims.x]);
         break;
       }
     }
@@ -84,9 +88,10 @@ void fprint_mat<int>(FILE* file_ptr, const char* name, int* a, const dim3& dims)
       fprintf(file_ptr, ".\n.\n.\n");
       fprintf(file_ptr, "i = %3d:", i);
       for (size_t j = 0; j < dims.y; j++) {
-        fprintf(file_ptr, " %10d", a[i + j * dims.x]);
+        fprintf(file_ptr, format.c_str(), a[i + j * dims.x]);
         if (j == kMaxElement && j < dims.y) {
-          fprintf(file_ptr, " ... %10d", a[i + (dims.y - 1) * dims.x]);
+          format = " ..." + format;
+          fprintf(file_ptr, format.c_str(), a[i + (dims.y - 1) * dims.x]);
           break;
         }
       }
