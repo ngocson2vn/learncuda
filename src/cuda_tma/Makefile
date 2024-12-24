@@ -1,6 +1,6 @@
 CUDA_INCLUDE = /usr/local/cuda/include
 CXX=nvcc
-CXXFLAGS=-keep -std=c++17 -g -O0 --generate-code=arch=compute_90a,code=sm_90a -Xcompiler=-Wno-psabi -Xcompiler=-fno-strict-aliasing
+CXXFLAGS=-std=c++17 -g -O0 --generate-code=arch=compute_90a,code=sm_90a
 CXXFLAGS+= --expt-relaxed-constexpr -D__CUDA_ARCH_FEAT_SM90_ALL
 CXXFLAGS+= -I$(CUDA_INCLUDE)
 

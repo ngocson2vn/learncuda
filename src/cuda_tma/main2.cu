@@ -179,17 +179,24 @@ int main(int argc, char** argv) {
   constexpr int SMEM_WIDTH = 32;
   constexpr int kDataSize = GMEM_HEIGHT * GMEM_WIDTH;
 
+  // Create matrix A as a host vector
   thrust::host_vector<int> h_data(kDataSize);
+
+  // Initialize matrix A with zeros
   for (int i = 0; i < kDataSize; i++) h_data[i] = 0;
 
+  // Dump matrix A to output.txt
   FILE* file_ptr = get_file_ptr("output.txt");
   fprint_mat(file_ptr, "h_data", h_data.data(), dim3(GMEM_HEIGHT, GMEM_WIDTH, 1));
   fprintf(file_ptr, "\n\n");
 
+  // Initialize GPU 0
   device_init(0);
 
-
+  // Transfer matrix A from host to global memory on device
   thrust::device_vector<int> d_data = h_data;
+
+  // Get the global memory pointer to matrix A on device
   void* gmem_ptr = d_data.data().get();
   printf("gmem_ptr: %p\n", gmem_ptr);
 
@@ -241,6 +248,7 @@ int main(int argc, char** argv) {
 
   if (ret != CUDA_SUCCESS) {
     printf("Failed to create CUtensorMap object\n");
+    return 1;
   }
 
   // Kernel invocation with runtime cluster size
@@ -260,28 +268,41 @@ int main(int argc, char** argv) {
     config.attrs = attribute;
     config.numAttrs = 1;
 
+    /*
+    Launch 4 TMA kernels, each kernel operates on a quarter of matrix A
+    | 1 | 3 |
+    |---|---|
+    | 2 | 4 |
+    */
+
+    // Launch kernel 1
     int x = 0;
     int y = 0;
     CUDA_CHECK_ERROR(cudaLaunchKernelEx(&config, tma_kernel<SMEM_HEIGHT, SMEM_WIDTH, int>, tensor_map, x, y));
 
+    // Launch kernel 2
     x = SMEM_HEIGHT;
     CUDA_CHECK_ERROR(cudaLaunchKernelEx(&config, tma_kernel<SMEM_HEIGHT, SMEM_WIDTH, int>, tensor_map, x, y));
 
+    // Launch kernel 3
     x = 0;
     y = SMEM_WIDTH;
     CUDA_CHECK_ERROR(cudaLaunchKernelEx(&config, tma_kernel<SMEM_HEIGHT, SMEM_WIDTH, int>, tensor_map, x, y));
 
+    // Launch kernel 4
     x = SMEM_HEIGHT;
     y = SMEM_WIDTH;
     CUDA_CHECK_ERROR(cudaLaunchKernelEx(&config, tma_kernel<SMEM_HEIGHT, SMEM_WIDTH, int>, tensor_map, x, y));
   }
 
+  // Transfer matrix A from global memory to host memory
   thrust::host_vector<int> h_result = d_data;
   CUDA_CHECK_ERROR(cudaDeviceSynchronize());
 
+  // Dump matrix A to output.txt again
   fprint_mat(file_ptr, "h_result", h_result.data(), dim3(GMEM_HEIGHT, GMEM_WIDTH, 1));
   fprintf(file_ptr, "\n\n");
-  printf("DONE\n");
 
+  printf("DONE\n");
   return 0;
 }
