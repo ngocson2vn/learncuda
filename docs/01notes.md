@@ -395,3 +395,6 @@ This means that if 32 threads access 32 4-byte shared memory locations at once, 
 https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#asynchronous-barrier
 
 ## Temporal Splitting and Five Stages of Synchronization
+
+# Generic proxy and Async proxy
+https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#proxies

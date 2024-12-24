@@ -28,7 +28,7 @@
 #include "smem_helper.hpp"
 
 template<typename T>
-void type(T arg);
+void get_type(T arg);
 
 template <typename _TiledCopyS, typename _TiledCopyD, typename _GmemLayout,
           typename _SmemLayout, typename _TileShape>
@@ -113,6 +113,7 @@ __global__ static void __launch_bounds__(kNumThreads, 1)
   if (warp_idx == 0 and lane_predicate) {
     mbarrier.init(1 /* arrive count */);
     mbarrier.arrive_and_expect_tx(kTmaTransactionBytes);
+    // get_type(reinterpret_cast<BarrierType &>(mbarrier));
     copy(tmaLoad.with(reinterpret_cast<BarrierType &>(mbarrier)),
          cta_tmaS.partition_S(gS), cta_tmaS.partition_D(sS));
   }
@@ -174,6 +175,8 @@ int copy_host_tma_load_and_store_kernel(int M, int N, int iterations = 1) {
   // NOTE: same smem layout for TMA load and store
   auto smemLayout = make_layout(tileShape, LayoutRight{});
   auto tma_load = make_tma_copy(SM90_TMA_LOAD{}, tensor_S, smemLayout);
+  // get_type(tma_load);
+
   printf("tma_load:\n");
   print(tma_load);
   printf("\n");
