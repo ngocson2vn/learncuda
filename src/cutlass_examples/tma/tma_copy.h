@@ -105,15 +105,24 @@ __global__ static void __launch_bounds__(kNumThreads, 1)
 
   // Get CTA view of gmem tensor
   Tensor mS = tmaLoad.get_tma_tensor(shape(gmemLayout));
+  // What is tma tensor?
+  // `tmaLoad` is a TiledCopy that inherits from `Copy_Atom` in cutlass/include/cute/atom/copy_atom.hpp:52
+  // `get_tma_tensor` is defined in cutlass/include/cute/atom/copy_traits_sm90_tma.hpp:153
+
   auto blkCoord = make_coord(blockIdx.x, blockIdx.y);
+
   Tensor gS = local_tile(mS, tileShape, blkCoord);
+  // What does this line mean?
+  // Get the appropriate gmem tile for this threadblock
+
 
   auto cta_tmaS = tmaLoad.get_slice(Int<0>{});
 
   if (warp_idx == 0 and lane_predicate) {
     mbarrier.init(1 /* arrive count */);
     mbarrier.arrive_and_expect_tx(kTmaTransactionBytes);
-    // get_type(reinterpret_cast<BarrierType &>(mbarrier));
+    
+    // Copy from src --> dst
     copy(tmaLoad.with(reinterpret_cast<BarrierType &>(mbarrier)),
          cta_tmaS.partition_S(gS), cta_tmaS.partition_D(sS));
   }

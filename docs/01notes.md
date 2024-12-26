@@ -398,3 +398,9 @@ https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#asynchronous-ba
 
 # Generic proxy and Async proxy
 https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#proxies
+
+# Dynamic Shared Memory Size
+```C++
+    printf("  Total amount of dynamic shared memory:         %zu bytes\n",
+           deviceProp.sharedMemPerBlockOptin);
+```
