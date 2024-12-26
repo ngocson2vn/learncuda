@@ -88,8 +88,7 @@ gemm_nt(int m, int n, int k,
     > 
   */
   auto sA = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TA>{}, make_shape(bM,bK,bP));
-  cute::print(sA);
-  printf("\n");
+  printf("sA: "); cute::print(sA); printf("\n");
 
   auto sB = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TB>{}, make_shape(bN,bK,bP));
 

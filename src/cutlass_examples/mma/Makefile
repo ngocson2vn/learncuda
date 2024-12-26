@@ -6,7 +6,7 @@ CUTLASS_INCLUDE = ../../../cutlass/include
 CUTLASS_UTIL = ../../../cutlass/tools/util/include
 
 # NVCC_FLAGS = -std=c++17 -g -O0 --compiler-options=-fno-inline --expt-relaxed-constexpr -gencode arch=compute_75,code=sm_75 -gencode arch=compute_86,code=sm_86
-NVCC_FLAGS = -std=c++17 -g -O0 --compiler-options=-fno-inline --expt-relaxed-constexpr
+NVCC_FLAGS = -std=c++17 -g -O3 --compiler-options=-fno-inline --expt-relaxed-constexpr
 # NVCC_FLAGS += -gencode arch=compute_75,code=sm_75
 NVCC_FLAGS += --disable-warnings
 cuda_version := $(shell /usr/local/cuda/bin/nvcc --version | grep cuda)
@@ -18,13 +18,10 @@ else
 	$(error "Hopper GPU is required")
 endif
 
-default: hopper
+default: run
 
-hello_mma: cutlass hello_mma.o
-	g++ -L$(CUDA_LIB) -lcudart -o hello_mma hello_mma.o
-
-hello_mma.o: hello_mma.cu
-	$(NVCC) $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -c hello_mma.cu
+run: hopper
+	./hopper
 
 test: cutlass test.o
 	clang++ -ggdb -O0 -L$(CUDA_LIB) -lcudart -o test test.o && echo && ./test
@@ -52,7 +49,7 @@ xtest: test.cc
 hopper: wgmma_sm90.o
 	g++ -L$(CUDA_LIB) -o hopper wgmma_sm90.o -lcudart -ldl
 
-wgmma_sm90.o: wgmma_sm90.cu
+wgmma_sm90.o: gemm.h wgmma_sm90.cu
 	$(NVCC) $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -I$(CUTLASS_INCLUDE) -I$(CUTLASS_UTIL) -c wgmma_sm90.cu
 
 cutlass:

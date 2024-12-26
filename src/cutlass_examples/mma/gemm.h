@@ -39,8 +39,8 @@ namespace sm90 {
 
 template <class ElementA,
           class ElementB,
-          class SmemLayoutA,  // (M,K,P)
-          class SmemLayoutB>  // (N,K,P)
+          class SmemLayoutA,  // (bM,bK,bP)
+          class SmemLayoutB>  // (bN,bK,bP)
 struct SharedStorage
 {
   array_aligned<ElementA, cosize_v<SmemLayoutA>> smem_A;
@@ -90,7 +90,7 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
 
   // Get the appropriate blocks for this thread block
   auto cta_coord = make_coord(blockIdx.x, blockIdx.y, _);              // (m,n,k)
-  Tensor gA = local_tile(mA, cta_tiler, cta_coord, Step<_1, X,_1>{});  // (BLK_M,BLK_K,k)
+  Tensor gA = local_tile(mA, cta_tiler, cta_coord, Step<_1, X,_1>{});  // (BLK_M,BLK_K,k) k = K/bK
   Tensor gB = local_tile(mB, cta_tiler, cta_coord, Step< X,_1,_1>{});  // (BLK_N,BLK_K,k)
   Tensor gC = local_tile(mC, cta_tiler, cta_coord, Step<_1,_1, X>{});  // (BLK_M,BLK_N)
 
@@ -100,7 +100,7 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
   using SharedStorage = SharedStorage<TA, TB, SmemLayoutA, SmemLayoutB>;
   SharedStorage& smem = *reinterpret_cast<SharedStorage*>(shared_memory);
   if (thread0()) {
-    printf("shared_memory: %ld\n", sizeof(SharedStorage));
+    printf("Dynamic shared memory size: %ld\n", sizeof(SharedStorage));
   }
 
   Tensor sA = make_tensor(make_smem_ptr(smem.smem_A.data()), SmemLayoutA{}); // (BLK_M,BLK_K,PIPE)
@@ -120,25 +120,35 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
 
   auto [tAgA, tAsA] = tma_partition(tma_a, Int<0>{}, Layout<_1>{},
                                     group_modes<0,2>(sA), group_modes<0,2>(gA));  // (TMA,k) and (TMA,PIPE)
+  if (thread0()) {
+    printf("tma_a: "); print(tma_a); printf("\n");
+    printf("tAsA: "); print(tAsA); printf("\n");
+  }
 
   auto [tBgB, tBsB] = tma_partition(tma_b, Int<0>{}, Layout<_1>{},
                                     group_modes<0,2>(sB), group_modes<0,2>(gB));  // (TMA,k) and (TMA,PIPE)
+  if (thread0()) {
+    printf("tBsB: "); print(tBsB); printf("\n");
+  }
 
   // The TMA is responsible for copying everything in mode-0 of tAsA and tBsB
   constexpr int kTmaTransactionBytes = CUTE_STATIC_V(size<0>(tAsA)) * sizeof(TA) +
                                        CUTE_STATIC_V(size<0>(tBsB)) * sizeof(TB);
+  if (thread0()) {
+    printf("kTmaTransactionBytes: %d\n", kTmaTransactionBytes);
+  }
 
   //
   // PREFETCH
   //
 
-  auto K_PIPE_MAX = size<1>(tAsA);
+  auto K_PIPE_MAX = size<1>(tAsA); // = bP = 3
   if (thread0()) {
     printf("blockIdx.x=%d blockIdx.y=%d K_PIPE_MAX = %ld\n", blockIdx.x, blockIdx.y, (int)K_PIPE_MAX);
   }
 
   // Total count of tiles
-  int k_tile_count = size<1>(tAgA);
+  int k_tile_count = size<1>(tAgA); // = K/bK = 1024 / 64 = 16
   if (thread0()) {
     printf("blockIdx.x=%d blockIdx.y=%d k_tile_count = %ld\n", blockIdx.x, blockIdx.y, (int)k_tile_count);
   }
@@ -158,7 +168,7 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
   for (int pipe = 0; pipe < K_PIPE_MAX; ++pipe) {
     if ((warp_idx == 0) && lane_predicate) {
       ProducerBarType::init(&producer_mbar[pipe],   1);
-      ConsumerBarType::init(&consumer_mbar[pipe], 128);
+      ConsumerBarType::init(&consumer_mbar[pipe], blockDim.x * blockDim.y * blockDim.z); // Entire block
     }
   }
   // Ensure barrier init is complete on all CTAs
@@ -201,6 +211,21 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
   // Allocate "fragments"
   Tensor tCrA = thr_mma.make_fragment_A(tCsA);                         // (MMA,MMA_M,MMA_K,PIPE)
   Tensor tCrB = thr_mma.make_fragment_B(tCsB);                         // (MMA,MMA_N,MMA_K,PIPE)
+
+  if (thread0()) {
+    printf("\n");
+    printf("blockIdx.x=%d blockIdx.y=%d tCrC: ", blockIdx.x, blockIdx.y);
+    print(tCrC);
+    printf("\n");
+
+    printf("blockIdx.x=%d blockIdx.y=%d tCrA: ", blockIdx.x, blockIdx.y);
+    print(tCrA);
+    printf("\n");
+
+    printf("blockIdx.x=%d blockIdx.y=%d tCrB: ", blockIdx.x, blockIdx.y);
+    print(tCrB);
+    printf("\n\n");
+  }
 
   //
   // PIPELINED MAIN LOOP
