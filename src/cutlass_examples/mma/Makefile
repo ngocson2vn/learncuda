@@ -6,7 +6,7 @@ CUTLASS_INCLUDE = ../../../cutlass/include
 CUTLASS_UTIL = ../../../cutlass/tools/util/include
 
 # NVCC_FLAGS = -std=c++17 -g -O0 --compiler-options=-fno-inline --expt-relaxed-constexpr -gencode arch=compute_75,code=sm_75 -gencode arch=compute_86,code=sm_86
-NVCC_FLAGS = -std=c++17 -g -O3 --compiler-options=-fno-inline --expt-relaxed-constexpr
+NVCC_FLAGS = -std=c++17 -g -O0 --compiler-options=-fno-inline --expt-relaxed-constexpr #--device-debug
 # NVCC_FLAGS += -gencode arch=compute_75,code=sm_75
 NVCC_FLAGS += --disable-warnings
 cuda_version := $(shell /usr/local/cuda/bin/nvcc --version | grep cuda)
@@ -18,7 +18,7 @@ else
 	$(error "Hopper GPU is required")
 endif
 
-default: run
+default: hopper
 
 run: hopper
 	./hopper

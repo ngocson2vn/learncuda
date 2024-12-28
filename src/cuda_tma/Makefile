@@ -23,5 +23,8 @@ main2: main2.o
 main2.o: main2.cu
 	$(CXX) -c $(CXXFLAGS) -o "$@" main2.cu
 
+main2.ptx: main2.cu
+	$(CXX) $(CXXFLAGS) -ptx -o "$@" main2.cu
+
 clean: 
 	rm -f *.o output.txt main1 main2

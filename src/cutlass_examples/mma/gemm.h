@@ -201,6 +201,13 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
 
   ThrMMA thr_mma = mma.get_thread_slice(threadIdx.x);
   Tensor tCsA = thr_mma.partition_A(sA);                               // (MMA,MMA_M,MMA_K,PIPE)
+  /*
+    tCsA: Sw<3,4,3>_smem_ptr[16b](0x148000000400) o ((_64,(_8,_2)),_2,_4,_3):((_1,(_64,_1024)),_512,_2048,_8192)
+    MMA is the MxK shape of the MMA Atom SM90_64x64x16_F16F16F16_SS.
+    MMA_M and MMA_K are the extents of its tiling across the M and K modes of sA (so that MMA_M=bM/64=2 and MMA_K=bK/16=4).
+    PIPE is the number of stages.
+  */
+
   Tensor tCsB = thr_mma.partition_B(sB);                               // (MMA,MMA_N,MMA_K,PIPE)
   Tensor tCgC = thr_mma.partition_C(gC);                               // (MMA,MMA_M,MMA_N)
 
@@ -213,6 +220,19 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
   Tensor tCrB = thr_mma.make_fragment_B(tCsB);                         // (MMA,MMA_N,MMA_K,PIPE)
 
   if (thread0()) {
+    printf("\n");
+    printf("blockIdx.x=%d blockIdx.y=%d tCgC: ", blockIdx.x, blockIdx.y);
+    print(tCgC);
+    printf("\n");
+
+    printf("blockIdx.x=%d blockIdx.y=%d tCsA: ", blockIdx.x, blockIdx.y);
+    print(tCsA);
+    printf("\n");
+
+    printf("blockIdx.x=%d blockIdx.y=%d tCsB: ", blockIdx.x, blockIdx.y);
+    print(tCsB);
+    printf("\n\n");
+
     printf("\n");
     printf("blockIdx.x=%d blockIdx.y=%d tCrC: ", blockIdx.x, blockIdx.y);
     print(tCrC);
@@ -250,8 +270,111 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
     ProducerBarType::wait(&producer_mbar[read_pipe], read_state.phase());
 
     // MMAs to cover 1 K_TILE
-    warpgroup_arrive();
+    warpgroup_arrive(); // wgmma.fence
+    
     gemm(mma, tCrA(_,_,_,read_pipe), tCrB(_,_,_,read_pipe), tCrC);     // (V,M) x (V,N) => (V,M,N)
+    /*============================================================================================
+      cutlass/include/cute/algorithm/gemm.hpp:
+      ============================================================
+      L1 gemm runs 16 times because k_tile_count = 16
+      ============================================================
+      template <class MMA,
+                class TA, class ALayout,
+                class TB, class BLayout,
+                class TC, class CLayout>
+      CUTE_HOST_DEVICE
+      void
+      gemm(MMA_Atom<MMA>       const& mma,
+          Tensor<TA, ALayout> const& A,
+          Tensor<TB, BLayout> const& B,
+          Tensor<TC, CLayout>      & C)
+      {
+        return gemm(mma, C, A, B, C);
+      }
+
+      ============================================================
+      L2 gemm runs 16 times because L1 gemm calls it 16 times
+      ============================================================
+      // Dispatch [5]: (V,M,K) x (V,N,K) => (V,M,N)
+      template <class MMA,
+                class TD, class DLayout,
+                class TA, class ALayout,
+                class TB, class BLayout,
+                class TC, class CLayout,
+                __CUTE_REQUIRES(DLayout::rank == 3 && is_rmem<TD>::value &&
+                                ALayout::rank == 3 && is_rmem<TA>::value &&
+                                BLayout::rank == 3 && is_rmem<TB>::value &&
+                                CLayout::rank == 3 && is_rmem<TC>::value)>
+      CUTE_HOST_DEVICE
+      void
+      gemm(MMA_Atom<MMA>       const& mma,
+          Tensor<TD, DLayout>      & D,  // (V,M,N) Logical data
+          Tensor<TA, ALayout> const& A,  // (V,M,K) Logical data
+          Tensor<TB, BLayout> const& B,  // (V,N,K) Logical data
+          Tensor<TC, CLayout> const& C)  // (V,M,N) Logical data
+      {
+        CUTE_STATIC_ASSERT_V(size<1>(A) == size<1>(C));  // AM == CM
+        CUTE_STATIC_ASSERT_V(size<1>(B) == size<2>(C));  // BN == CN
+        CUTE_STATIC_ASSERT_V(size<2>(A) == size<2>(B));  // AK == BK
+        CUTE_STATIC_ASSERT_V(size<0>(C) == size<0>(D) && size<1>(C) == size<1>(D) && size<2>(C) == size<2>(D));
+        auto K = size<2>(A);
+
+        CUTE_UNROLL
+        for (int k = 0; k < K; ++k) {
+          gemm(mma, D, A(_,_,k), B(_,_,k), C);
+        }
+      }
+
+      ============================================================
+      L3 gemm runs 64 times because K = size<2>(A) = MMA_K = 4
+      ============================================================
+      // Dispatch [4]: (V,M) x (V,N) => (V,M,N)
+      template <class MMA,
+                class TD, class DLayout,
+                class TA, class ALayout,
+                class TB, class BLayout,
+                class TC, class CLayout,
+                __CUTE_REQUIRES(DLayout::rank == 3 && is_rmem<TD>::value &&
+                                ALayout::rank == 2 && is_rmem<TA>::value &&
+                                BLayout::rank == 2 && is_rmem<TB>::value &&
+                                CLayout::rank == 3 && is_rmem<TC>::value)>
+      CUTE_HOST_DEVICE
+      void
+      gemm(MMA_Atom<MMA>       const& mma,
+          Tensor<TD, DLayout>      & D,  // (V,M,N) Logical data
+          Tensor<TA, ALayout> const& A,  // (V,M)   Logical data
+          Tensor<TB, BLayout> const& B,  // (V,N)   Logical data
+          Tensor<TC, CLayout> const& C)  // (V,M,N) Logical data
+      {
+        ...
+      }
+
+      ============================================================
+      L4 gemm runs 256 times because L3 gemm calls it 64 * 4 times
+      ============================================================
+      // Dispatch [1]: (V) x (V) => (V)
+      template <class MMA,
+                class TD, class DLayout,
+                class TA, class ALayout,
+                class TB, class BLayout,
+                class TC, class CLayout,
+                __CUTE_REQUIRES(DLayout::rank == 1 && is_rmem<TD>::value &&
+                                ALayout::rank == 1 && is_rmem<TA>::value &&
+                                BLayout::rank == 1 && is_rmem<TB>::value &&
+                                CLayout::rank == 1 && is_rmem<TC>::value)>
+      CUTE_HOST_DEVICE
+      void
+      gemm(MMA_Atom<MMA>       const& mma,
+          Tensor<TD, DLayout>      & D,  // (V) Logical data
+          Tensor<TA, ALayout> const& A,  // (V) Logical data
+          Tensor<TB, BLayout> const& B,  // (V) Logical data
+          Tensor<TC, CLayout> const& C)  // (V) Logical data
+      {
+        // No static assertions on (V), MMA checks compatibility
+        mma.call(D, A, B, C);
+      }
+    ============================================================================================*/
+
     warpgroup_commit_batch();
 
     // Wait for all MMAs in a K_TILE to complete

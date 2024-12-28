@@ -193,7 +193,7 @@
             "name": "cute_mma",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/src/cutlass_examples/mma/test",
+            "program": "${workspaceFolder}/src/cutlass_examples/mma/hopper",
             "cwd": "${workspaceFolder}/src/cutlass_examples/mma",
             "args": [],
             "stopAtEntry": true,

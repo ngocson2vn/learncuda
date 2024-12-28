@@ -180,6 +180,13 @@ gemm_tn(int m, int n, int k,
 
   // Define the MMA
   TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F16F16F16_SS<GMMA::Major::K,GMMA::Major::K>{});
+  /*
+  struct cute::TiledMMA<
+    cute::MMA_Atom<cute::SM90_64x64x16_F16F16F16_SS<cute::SM90::GMMA::Major::K, cute::SM90::GMMA::Major::K>>, 
+    cute::Layout<cute::Shape<cute::_1, cute::_1, cute::_1>>, 
+    cute::Tile<cute::Underscore, cute::Underscore, cute::Underscore>
+  >
+  */
 
   // Define the TMAs
   // Create Global memory tensors for TMA inspection
