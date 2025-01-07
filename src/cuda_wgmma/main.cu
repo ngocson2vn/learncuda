@@ -217,22 +217,28 @@ struct MMA_64x64x16_F32F16F16_SS
 {
   __device__ static void
   fma(
-      float& d00, float& d01, float& d02, float& d03, float& d04, float& d05, float& d06, float& d07, float& d08, float& d09, float& d10, float& d11, float& d12, float& d13, float& d14, float& d15,
-      float& d16, float& d17, float& d18, float& d19, float& d20, float& d21, float& d22, float& d23, float& d24, float& d25, float& d26, float& d27, float& d28, float& d29, float& d30, float& d31,
+      float& d00, float& d01, float& d02, float& d03, float& d04, float& d05, float& d06, float& d07,
+      float& d08, float& d09, float& d10, float& d11, float& d12, float& d13, float& d14, float& d15,
+      float& d16, float& d17, float& d18, float& d19, float& d20, float& d21, float& d22, float& d23,
+      float& d24, float& d25, float& d26, float& d27, float& d28, float& d29, float& d30, float& d31,
       uint64_t const& desc_a,
       uint64_t const& desc_b)
   {
     asm volatile(
       "{\n"
         "wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 "
-        "{ %0,  %1,  %2,  %3,  %4,  %5,  %6,  %7,  %8,  %9, %10, %11, %12, %13, %14, %15,"
-        " %16, %17, %18, %19, %20, %21, %22, %23, %24, %25, %26, %27, %28, %29, %30, %31 },"
+        "{ %0,  %1,  %2,  %3,  %4,  %5,  %6,  %7,  "
+        "  %8,  %9, %10, %11, %12, %13, %14, %15,  "
+        " %16, %17, %18, %19, %20, %21, %22, %23,  "
+        " %24, %25, %26, %27, %28, %29, %30, %31 },"
         " %32,"
         " %33,"
         " %34, %35, %36, %37, %38;\n"
       "}\n"
-        : "+f"(d00), "+f"(d01), "+f"(d02), "+f"(d03), "+f"(d04), "+f"(d05), "+f"(d06), "+f"(d07), "+f"(d08), "+f"(d09), "+f"(d10), "+f"(d11), "+f"(d12), "+f"(d13), "+f"(d14), "+f"(d15),
-          "+f"(d16), "+f"(d17), "+f"(d18), "+f"(d19), "+f"(d20), "+f"(d21), "+f"(d22), "+f"(d23), "+f"(d24), "+f"(d25), "+f"(d26), "+f"(d27), "+f"(d28), "+f"(d29), "+f"(d30), "+f"(d31)
+        : "+f"(d00), "+f"(d01), "+f"(d02), "+f"(d03), "+f"(d04), "+f"(d05), "+f"(d06), "+f"(d07),
+          "+f"(d08), "+f"(d09), "+f"(d10), "+f"(d11), "+f"(d12), "+f"(d13), "+f"(d14), "+f"(d15),
+          "+f"(d16), "+f"(d17), "+f"(d18), "+f"(d19), "+f"(d20), "+f"(d21), "+f"(d22), "+f"(d23),
+          "+f"(d24), "+f"(d25), "+f"(d26), "+f"(d27), "+f"(d28), "+f"(d29), "+f"(d30), "+f"(d31)
         :  "l"(desc_a), "l"(desc_b),
            "n"(scaleD), "n"(scaleA), "n"(scaleB), "n"(tnspA), "n"(tnspB)
     );
@@ -370,8 +376,6 @@ __global__ void wgmma_kernel(
   __shared__ alignas(128) ABType sA[M * K];
   __shared__ alignas(128) ABType sB[N * K];
   __shared__ alignas(8) uint64_t mbar;
-  
-  __shared__ char done[128];
 
   constexpr int kTmaTransactionBytes = M * K * sizeof(ABType) + N * K * sizeof(ABType);
   int warp_idx = canonical_warp_idx_sync();
@@ -381,8 +385,6 @@ __global__ void wgmma_kernel(
   if ((warp_idx == 0) && lane_predicate) {
     mbarrier_init(&mbar, 1);
   }
-
-  done[threadIdx.x] = 0;
 
   // This is to ensure that `mbar` is really initialized across threads in the same cluster
   cluster_sync();
@@ -418,34 +420,6 @@ __global__ void wgmma_kernel(
   int stride_d[] = {N, 1};
   int* D_indexes = gen_indexes(threadIdx.x, stride_d);
 
-  // Clear gD
-  for (int i = 0; i < N/2; i++) {
-    int idx = D_indexes[i];
-    gD[idx] = DType(0);
-  }
-
-  // Make the generic proxy operations visible to the async proxy
-  fence_proxy_async();
-
-#if 0
-  if (threadIdx.x > 0) {
-    while (!done[threadIdx.x - 1]) {
-      __nanosleep(1000);
-    }
-  }
-
-  printf("thread_idx = %d\n", threadIdx.x);
-  int k = 0;
-  for (; k < N/2; k++) {
-    printf(" %4d", D_indexes[k]);
-  }
-  printf("\n\n");
-  done[threadIdx.x] = 1;
-#endif
-
-
-  MMA_64x64x16_F32F16F16_SS mma_atom;
-
   int idx00 = D_indexes[0];
   int idx01 = D_indexes[1];
   int idx02 = D_indexes[2];
@@ -479,6 +453,15 @@ __global__ void wgmma_kernel(
   int idx30 = D_indexes[30];
   int idx31 = D_indexes[31];
 
+  // Clear gD
+  for (int i = 0; i < N/2; i++) {
+    int idx = D_indexes[i];
+    gD[idx] = DType(0);
+  }
+
+  // Make the generic proxy operations visible to the async proxy
+  fence_proxy_async();
+
   // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
   // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
   // and subsequent accesses to the same registers by a `wgmma.mma_async` instruction. 
@@ -486,9 +469,12 @@ __global__ void wgmma_kernel(
   warpgroup_arrive();
 
   // Issue WGMMA operation
+  MMA_64x64x16_F32F16F16_SS mma_atom;
   mma_atom.fma(
-    gD[idx00], gD[idx01], gD[idx02], gD[idx03], gD[idx04], gD[idx05], gD[idx06], gD[idx07], gD[idx08], gD[idx09], gD[idx10], gD[idx11], gD[idx12], gD[idx13], gD[idx14], gD[idx15],
-    gD[idx16], gD[idx17], gD[idx18], gD[idx19], gD[idx20], gD[idx21], gD[idx22], gD[idx23], gD[idx24], gD[idx25], gD[idx26], gD[idx27], gD[idx28], gD[idx29], gD[idx30], gD[idx31],
+    gD[idx00], gD[idx01], gD[idx02], gD[idx03], gD[idx04], gD[idx05], gD[idx06], gD[idx07],
+    gD[idx08], gD[idx09], gD[idx10], gD[idx11], gD[idx12], gD[idx13], gD[idx14], gD[idx15],
+    gD[idx16], gD[idx17], gD[idx18], gD[idx19], gD[idx20], gD[idx21], gD[idx22], gD[idx23],
+    gD[idx24], gD[idx25], gD[idx26], gD[idx27], gD[idx28], gD[idx29], gD[idx30], gD[idx31],
     desc_a,
     desc_b
   );
@@ -565,7 +551,7 @@ int main(int argc, char** argv) {
   fprintf(file_ptr, "\n\n");
 
 
-  printf("d_A layout:\n");
+  printf("sA layout:\n");
   for (int i = 0; i < M; i++) {
     if (i > 0 && i % 8 == 0) {
       printf("\n");
@@ -582,7 +568,7 @@ int main(int argc, char** argv) {
   }
   printf("\n\n");
 
-  printf("d_B layout:\n");
+  printf("sB layout:\n");
   for (int i = 0; i < K; i++) {
     if (i > 0 && i % 8 == 0) {
       printf("\n");
@@ -602,6 +588,7 @@ int main(int argc, char** argv) {
 
   // Init cuda
   device_init(0);
+  printf("\n");
 
   // Create a stream
   cudaStream_t stream;
