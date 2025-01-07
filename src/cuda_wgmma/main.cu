@@ -314,17 +314,6 @@ void create_tensor_map(CUtensorMap* tensor_map, DataType* gmem_ptr) {
   }
 }
 
-template <typename DataType>
-__global__ void test_kernel(DataType* A, size_t size) {
-  if (threadIdx.x == 0) {
-    printf("threadIdx.x %d\n", threadIdx.x);
-    printf("A:");
-    for (int i = 0; i < size; i++) {
-      printf(" %.2f", __half2float(A[i]));
-    }
-    printf("\n");
-  }
-}
 
 template<typename DataType>
 __device__ uint64_t create_desc(DataType* smem_ptr) {
@@ -350,7 +339,7 @@ __device__ uint64_t create_desc(DataType* smem_ptr) {
 }
 
 // https://docs.nvidia.com/cuda/parallel-thread-execution/#matrix-fragments-for-wgmma-mma-async-m64nnk16
-__device__ int* get_indexes(int thread_idx, int* stride_d) {
+__device__ int* gen_indexes(int thread_idx, int* stride_d) {
   int c = stride_d[0] / 2;
   int* D_indexes = new int[c];
 
@@ -421,47 +410,21 @@ __global__ void wgmma_kernel(
 
   mbarrier_wait(&mbar, 0);
 
-#if 1
-  // Double-check data integrity
-  fence_proxy_async();
-  if ((warp_idx == 0) && lane_predicate) {
-    int ok = 0;
-    int ng = 0;
-    for (int i = 0; i < M * K; i++) {
-      if (sA[i] == gA[i]) {
-        ok++;
-      } else {
-        ng++;
-      }
-    }
-    printf("sA: %d ok, %d ng\n", ok, ng);
-
-    ok = 0;
-    ng = 0;
-    for (int i = 0; i < N * K; i++) {
-      if (sB[i] == gB[i]) {
-        ok++;
-      } else {
-        ng++;
-      }
-    }
-    printf("sB: %d ok, %d ng\n", ok, ng);
-  }
-#endif
-
   // Create matrix descriptors
   uint64_t desc_a = create_desc<ABType>(&sA[0]);
   uint64_t desc_b = create_desc<ABType>(&sB[0]);
 
   int shape_d[] = {M, N};
   int stride_d[] = {N, 1};
+  int* D_indexes = gen_indexes(threadIdx.x, stride_d);
 
-  int* D_indexes = get_indexes(threadIdx.x, stride_d);
+  // Clear gD
   for (int i = 0; i < N/2; i++) {
     int idx = D_indexes[i];
     gD[idx] = DType(0);
   }
 
+  // Make the generic proxy operations visible to the async proxy
   fence_proxy_async();
 
 #if 0
@@ -479,25 +442,6 @@ __global__ void wgmma_kernel(
   printf("\n\n");
   done[threadIdx.x] = 1;
 #endif
-
-
-  // MMA_64x8x16_F32F16F16_SS mma_atom;
-
-  // int idx00 = D_indexes[0];
-  // int idx01 = D_indexes[1];
-  // int idx02 = D_indexes[2];
-  // int idx03 = D_indexes[3];
-
-  // // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
-  // // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
-  // // and subsequent accesses to the same registers by a `wgmma.mma_async` instruction. 
-  // // Only the accumulator register and the input registers containing the fragments of matrix A require this ordering.
-  // warpgroup_arrive();
-  // mma_atom.fma(
-  //   gD[idx00], gD[idx01], gD[idx02], gD[idx03],
-  //   desc_a,
-  //   desc_b
-  // );
 
 
   MMA_64x64x16_F32F16F16_SS mma_atom;
@@ -573,10 +517,8 @@ DType* matmul_cpu(ABType* MatA, ABType* MatB) {
 int main(int argc, char** argv) {
   using DType = float;
   using ABType = bf16_t;
-  // using ABType = float;
 
   constexpr int M = 64;
-  // constexpr int N = 8;
   constexpr int N = 64;
   constexpr int K = 16;
   
@@ -599,7 +541,6 @@ int main(int argc, char** argv) {
   for (int i = 0; i < shape_a[0]; i++) {
     for (int j = 0; j < shape_a[1]; j++) {
       h_A_org[i * stride_a[0] + j * stride_a[1]] = ABType(dist(gen));
-      // h_A_org[i * stride_a[0] + j * stride_a[1]] = init_val;
     }
   }
 
@@ -607,8 +548,6 @@ int main(int argc, char** argv) {
   for (int i = 0; i < shape_b[0]; i++) {
     for (int j = 0; j < shape_b[1]; j++) {
       h_B_org[i * stride_b[0] + j * stride_b[1]] = ABType(dist(gen));
-      // init_val = 1.0 + 4.0 * (j % 2);
-      // h_B_org[i * stride_b[0] + j * stride_b[1]] = ABType(init_val);
     }
   }
 
@@ -686,25 +625,11 @@ int main(int argc, char** argv) {
   CUtensorMap tensor_map_B{};
   create_tensor_map<ABType, K, N, false>(&tensor_map_B, d_B);
 
-  // void* kernel = reinterpret_cast<void*>(wgmma_kernel<DType, ABType, M, N, K>);
-  // dim3 grid_dim(1);
-  // dim3 block_dim(128);
-  // void* kernel_args[] = {
-  //   static_cast<void*>(&d_D),
-  //   static_cast<void*>(&d_A),
-  //   static_cast<void*>(&d_B),
-  //   static_cast<void*>(&tensor_map_A),
-  //   static_cast<void*>(&tensor_map_B)
-  // };
-  // CUDA_CHECK_ERROR(cudaLaunchKernel(kernel, grid_dim, block_dim, kernel_args, 0UL, stream));
-
-
   // Kernel invocation with runtime cluster size
   {
     cudaLaunchConfig_t config = {0};
     // The grid dimension is not affected by cluster launch, and is still enumerated
-    // using number of blocks.
-    // The grid dimension should be a multiple of cluster size.
+    // using number of blocks. The grid dimension should be a multiple of cluster size.
     config.gridDim = dim3(1);
     config.blockDim = dim3(128);
     config.stream = stream;
@@ -718,8 +643,6 @@ int main(int argc, char** argv) {
     config.numAttrs = 1;
 
     // Launch wgmma_kernel
-    // CUDA_CHECK_ERROR(cudaLaunchKernelEx(&config, test_kernel<ABType>, d_A, M*K));
-
     CUDA_CHECK_ERROR(
       cudaLaunchKernelEx(
         &config,
