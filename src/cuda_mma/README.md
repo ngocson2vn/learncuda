@@ -1,9 +1,5 @@
-## Prerequisites
-```Bash
-GPU: NVIDIA H100
-Driver Version: >=535.129.03
-CUDA Version: 12.4
-```
+# Hello mma
+<img src="./image.png" width="50%" />
 
 ## Build
 ```Bash
@@ -12,7 +8,5 @@ make
 
 ## Run
 ```Bash
-./main2
+./hello_mma
 ```
-Matrix A is dumped to `output.txt`.
-
