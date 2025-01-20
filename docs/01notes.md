@@ -330,18 +330,6 @@ Another term for an array dimension. Axes are numbered left to right; axis 0 is 
 In a two-dimensional vector, the elements of axis 0 are rows and the elements of axis 1 are columns.
 
 # cuDNN
-## cuDNN v8.2.4 for CUDA 11.4
-wget https://developer.nvidia.com/compute/machine-learning/cudnn/secure/8.2.4/11.4_20210831/cudnn-11.4-linux-x64-v8.2.4.15.tgz
-tar -xzf cudnn-11.4-linux-x64-v8.2.4.15.tgz
-sudo rsync -avP cuda/include/* /usr/local/cuda-11.4/include/
-sudo rsync -avP cuda/lib64/* /usr/local/cuda-11.4/lib64/
-
-## cuDNN v8.9.7
-https://developer.nvidia.com/rdp/cudnn-archive
-sudo rsync -avP cudnn-linux-x86_64-8.9.7.29_cuda12-archive/include/* /usr/local/cuda-12.2/include/
-sudo rsync -avP cudnn-linux-x86_64-8.9.7.29_cuda12-archive/lib/* /usr/local/cuda-12.2/lib64/
-
-
 ## Get cudnn version
 ```Bash
 cat <<EOF > main.c

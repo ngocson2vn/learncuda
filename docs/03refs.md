@@ -1,6 +1,8 @@
 # Blogs
 https://siboehm.com/articles/22/CUDA-MMM
 
+https://cudaforfun.substack.com/p/outperforming-cublas-on-h100-a-worklog?utm_campaign=post&utm_medium=web
+
 https://0mean1sigma.com/author/tushar/
 
 Markdown and LaTeX
@@ -9,6 +11,7 @@ https://ashki23.github.io/markdown-latex.html
 
 The Not So Short Introduction to LaTeX
 https://tobi.oetiker.ch/lshort/lshort.pdf
+
 
 <br/>
 

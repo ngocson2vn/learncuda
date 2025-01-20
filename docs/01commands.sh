@@ -73,6 +73,24 @@ dpkg -i nvidia-fabricmanager-550_550.54.15-1_amd64.deb
 sudo systemctl status nvidia-fabricmanager
 sudo systemctl start nvidia-fabricmanager
 
+
+########################################################################################################################
+# cuDNN
+########################################################################################################################
+## cuDNN v8.2.4 for CUDA 11.4
+wget https://developer.nvidia.com/compute/machine-learning/cudnn/secure/8.2.4/11.4_20210831/cudnn-11.4-linux-x64-v8.2.4.15.tgz
+tar -xzf cudnn-11.4-linux-x64-v8.2.4.15.tgz
+sudo rsync -avP cuda/include/* /usr/local/cuda-11.4/include/
+sudo rsync -avP cuda/lib64/* /usr/local/cuda-11.4/lib64/
+
+## cuDNN v8.9.7
+https://developer.nvidia.com/rdp/cudnn-archive
+Download https://developer.nvidia.com/downloads/compute/cudnn/secure/8.9.7/local_installers/12.x/cudnn-linux-x86_64-8.9.7.29_cuda12-archive.tar.xz/
+tar -xf cudnn-linux-x86_64-8.9.7.29_cuda12-archive.tar.xz
+sudo rsync -avP cudnn-linux-x86_64-8.9.7.29_cuda12-archive/include/* /usr/local/cuda-12.4/include/
+sudo rsync -avP cudnn-linux-x86_64-8.9.7.29_cuda12-archive/lib/* /usr/local/cuda-12.4/lib64/
+
+
 ########################################################################################################################
 # NVCC
 ########################################################################################################################
