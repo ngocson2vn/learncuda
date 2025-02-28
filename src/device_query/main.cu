@@ -40,29 +40,6 @@
 int *pArgc = NULL;
 char **pArgv = NULL;
 
-#if CUDART_VERSION < 5000
-
-// CUDA-C includes
-#include <cuda.h>
-
-// This function wraps the CUDA Driver API into a template function
-template <class T>
-inline void getCudaAttribute(T *attribute, CUdevice_attribute device_attribute,
-                             int device) {
-  CUresult error = cuDeviceGetAttribute(attribute, device_attribute, device);
-
-  if (CUDA_SUCCESS != error) {
-    fprintf(
-        stderr,
-        "cuSafeCallNoSync() Driver API error = %04d from file <%s>, line %i.\n",
-        error, __FILE__, __LINE__);
-
-    exit(EXIT_FAILURE);
-  }
-}
-
-#endif /* CUDART_VERSION < 5000 */
-
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
@@ -110,19 +87,11 @@ int main(int argc, char **argv) {
            deviceProp.major, deviceProp.minor);
 
     char msg[256];
-#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-    sprintf_s(msg, sizeof(msg),
-              "  Total amount of global memory:                 %.0f MBytes "
-              "(%llu bytes)\n",
-              static_cast<float>(deviceProp.totalGlobalMem / 1048576.0f),
-              (unsigned long long)deviceProp.totalGlobalMem);
-#else
     snprintf(msg, sizeof(msg),
              "  Total amount of global memory:                 %.0f MBytes "
              "(%llu bytes)\n",
              static_cast<float>(deviceProp.totalGlobalMem / 1048576.0f),
              (unsigned long long)deviceProp.totalGlobalMem);
-#endif
     printf("%s", msg);
 
     printf("  (%03d) Multiprocessors, (%03d) CUDA Cores/MP:    %d CUDA Cores\n",
@@ -131,11 +100,9 @@ int main(int argc, char **argv) {
            _ConvertSMVer2Cores(deviceProp.major, deviceProp.minor) *
                deviceProp.multiProcessorCount);
     printf(
-        "  GPU Max Clock rate:                            %.0f MHz (%0.2f "
-        "GHz)\n",
+        "  GPU Max Clock rate:                            %.0f MHz (%0.2f GHz)\n",
         deviceProp.clockRate * 1e-3f, deviceProp.clockRate * 1e-6f);
 
-#if CUDART_VERSION >= 5000
     // This is supported in CUDA 5.0 (runtime API device properties)
     printf("  Memory Clock rate:                             %.0f Mhz\n",
            deviceProp.memoryClockRate * 1e-3f);
@@ -146,29 +113,6 @@ int main(int argc, char **argv) {
       printf("  L2 Cache Size:                                 %d bytes\n",
              deviceProp.l2CacheSize);
     }
-
-#else
-    // This only available in CUDA 4.0-4.2 (but these were only exposed in the
-    // CUDA Driver API)
-    int memoryClock;
-    getCudaAttribute<int>(&memoryClock, CU_DEVICE_ATTRIBUTE_MEMORY_CLOCK_RATE,
-                          dev);
-    printf("  Memory Clock rate:                             %.0f Mhz\n",
-           memoryClock * 1e-3f);
-    int memBusWidth;
-    getCudaAttribute<int>(&memBusWidth,
-                          CU_DEVICE_ATTRIBUTE_GLOBAL_MEMORY_BUS_WIDTH, dev);
-    printf("  Memory Bus Width:                              %d-bit\n",
-           memBusWidth);
-    int L2CacheSize;
-    getCudaAttribute<int>(&L2CacheSize, CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE, dev);
-
-    if (L2CacheSize) {
-      printf("  L2 Cache Size:                                 %d bytes\n",
-             L2CacheSize);
-    }
-
-#endif
 
     printf(
         "  Maximum Texture Dimension Size (x,y,z)         1D=(%d), 2D=(%d, "
@@ -225,11 +169,6 @@ int main(int argc, char **argv) {
            deviceProp.surfaceAlignment ? "Yes" : "No");
     printf("  Device has ECC support:                        %s\n",
            deviceProp.ECCEnabled ? "Enabled" : "Disabled");
-#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-    printf("  CUDA Device Driver Mode (TCC or WDDM):         %s\n",
-           deviceProp.tccDriver ? "TCC (Tesla Compute Cluster Driver)"
-                                : "WDDM (Windows Display Driver Model)");
-#endif
     printf("  Device supports Unified Addressing (UVA):      %s\n",
            deviceProp.unifiedAddressing ? "Yes" : "No");
     printf("  Device supports Managed Memory:                %s\n",
@@ -260,6 +199,9 @@ int main(int argc, char **argv) {
     printf("  Tensor Cores per SM:                           %d\n", tensorCoresPerSM);
     printf("  Total Tensor Cores:                            %d\n", totalTensorCores);
 
+    //===========================================================================================
+    // Tensor Core
+    //===========================================================================================
     // Manually define FLOPs per Tensor Core per Cycle (architecture-specific)
     float flopsPerTensorCorePerCycle = 0;
     if (deviceProp.major == 7 && deviceProp.minor == 0) { // Volta
@@ -267,7 +209,7 @@ int main(int argc, char **argv) {
     } else if (deviceProp.major == 7 && deviceProp.minor == 5) { // Turing
       flopsPerTensorCorePerCycle = 64; // FP16, dense
     } else if (deviceProp.major == 8) { // Ampere
-      flopsPerTensorCorePerCycle = 128; // FP16, dense (256 with sparsity)
+      flopsPerTensorCorePerCycle = 256; // FP16, dense (512 with sparsity)
     } else if (deviceProp.major == 9) { // Hopper
       flopsPerTensorCorePerCycle = 956.5; // FP16, dense (1913 with sparsity)
     }
@@ -275,8 +217,18 @@ int main(int argc, char **argv) {
     printf("  FLOPs per Tensor Core per Cycle (FP16, dense): %d\n", int(flopsPerTensorCorePerCycle));
 
     // Calculate peak FP16 Tensor Core FLOPs
-    double peakFlops = (double)deviceProp.multiProcessorCount * tensorCoresPerSM * flopsPerTensorCorePerCycle * (deviceProp.clockRate * 1e3); // Hz
-    printf("  Peak FP16 Tensor Core FLOPs (dense):           %.2f TFLOPs\n", peakFlops * 1e-12);
+    double peakFlops = (double)deviceProp.multiProcessorCount * tensorCoresPerSM;
+           peakFlops *= flopsPerTensorCorePerCycle * (deviceProp.clockRate * 1e3); // Hz
+    printf("  Peak FP16 Tensor Core FLOPs (dense):           %d TFLOPs\n", int(peakFlops * 1e-12 + 0.5));
+    //===========================================================================================
+
+    // Peak Memory Bandwidth (GB/s) = (Memory Clock Rate (Hz) * Memory Bus Width (bits) * Number of Transfers per Clock) / 8
+    double peakMemoryBw = (deviceProp.memoryClockRate * 1e3f * deviceProp.memoryBusWidth * 2) / (8 * 1e9f);
+    printf("  Peak Memory Bandwidth (GB/s):                  %d GB/s\n", int(peakMemoryBw + 0.5));
+
+    // ops:byte ratio
+    double opsByteRatio = peakFlops / (peakMemoryBw * 1e9f);
+    printf("  Peak FP16 Tensor Core ops:byte ratio:          %d\n", int(opsByteRatio + 0.5));
 
     const char *sComputeMode[] = {
       "Default (multiple host threads can use ::cudaSetDevice() with device "
@@ -302,13 +254,7 @@ int main(int argc, char **argv) {
       checkCudaErrors(cudaGetDeviceProperties(&prop[i], i));
 
       // Only boards based on Fermi or later can support P2P
-      if ((prop[i].major >= 2)
-#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-          // on Windows (64-bit), the Tesla Compute Cluster driver for windows
-          // must be enabled to support this
-          && prop[i].tccDriver
-#endif
-          ) {
+      if (prop[i].major >= 2) {
         // This is an array of P2P capable GPUs
         gpuid[gpu_p2p_count++] = i;
       }
@@ -342,33 +288,19 @@ int main(int argc, char **argv) {
 
   // driver version
   sProfileString += ", CUDA Driver Version = ";
-#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-  sprintf_s(cTemp, 10, "%d.%d", driverVersion / 1000,
-            (driverVersion % 100) / 10);
-#else
   snprintf(cTemp, sizeof(cTemp), "%d.%d", driverVersion / 1000,
            (driverVersion % 100) / 10);
-#endif
   sProfileString += cTemp;
 
   // Runtime version
   sProfileString += ", CUDA Runtime Version = ";
-#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-  sprintf_s(cTemp, 10, "%d.%d", runtimeVersion / 1000,
-            (runtimeVersion % 100) / 10);
-#else
   snprintf(cTemp, sizeof(cTemp), "%d.%d", runtimeVersion / 1000,
            (runtimeVersion % 100) / 10);
-#endif
   sProfileString += cTemp;
 
   // Device count
   sProfileString += ", NumDevs = ";
-#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-  sprintf_s(cTemp, 10, "%d", deviceCount);
-#else
   snprintf(cTemp, sizeof(cTemp), "%d", deviceCount);
-#endif
   sProfileString += cTemp;
   sProfileString += "\n";
   printf("%s", sProfileString.c_str());
