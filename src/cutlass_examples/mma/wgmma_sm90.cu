@@ -47,6 +47,14 @@
 #include "fprint_mat.h"
 #include "gemm.h"
 
+template <typename T>
+void display_type() {
+  std::string func_name(__PRETTY_FUNCTION__);
+  std::string tmp = func_name.substr(func_name.find_first_of("[") + 1);
+  std::string type = "type" + tmp.substr(1, tmp.size() - 2);
+  printf("%s\n", type.c_str());
+}
+
 // Setup params for an NT GEMM
 template <class TA, class TB, class TC,
           class Alpha, class Beta>
@@ -180,6 +188,7 @@ gemm_tn(int m, int n, int k,
 
   // Define the MMA
   TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F16F16F16_SS<GMMA::Major::K,GMMA::Major::K>{});
+  display_type<decltype(tiled_mma)>();
   /*
   struct cute::TiledMMA<
     cute::MMA_Atom<cute::SM90_64x64x16_F16F16F16_SS<cute::SM90::GMMA::Major::K, cute::SM90::GMMA::Major::K>>, 

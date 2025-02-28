@@ -243,16 +243,51 @@ int main(int argc, char **argv) {
     printf("  Device PCI Domain ID / Bus ID / location ID:   %d / %d / %d\n",
            deviceProp.pciDomainID, deviceProp.pciBusID, deviceProp.pciDeviceID);
 
+    // Estimate Tensor Cores per SM based on architecture
+    int tensorCoresPerSM = 0;
+    if (deviceProp.major == 7 && deviceProp.minor >= 0) { // Volta (7.0), Turing (7.5)
+      tensorCoresPerSM = 8; // Volta/Turing
+    } else if (deviceProp.major == 8) { // Ampere (8.x)
+      tensorCoresPerSM = 4; // Ampere
+    } else if (deviceProp.major == 9) {
+      tensorCoresPerSM = 4; // Hopper
+    } else {
+      printf("  No Tensor Cores (pre-Volta architecture)\n");
+      continue;
+    }
+
+    int totalTensorCores = deviceProp.multiProcessorCount * tensorCoresPerSM;
+    printf("  Tensor Cores per SM:                           %d\n", tensorCoresPerSM);
+    printf("  Total Tensor Cores:                            %d\n", totalTensorCores);
+
+    // Manually define FLOPs per Tensor Core per Cycle (architecture-specific)
+    float flopsPerTensorCorePerCycle = 0;
+    if (deviceProp.major == 7 && deviceProp.minor == 0) { // Volta
+      flopsPerTensorCorePerCycle = 64; // FP16, dense
+    } else if (deviceProp.major == 7 && deviceProp.minor == 5) { // Turing
+      flopsPerTensorCorePerCycle = 64; // FP16, dense
+    } else if (deviceProp.major == 8) { // Ampere
+      flopsPerTensorCorePerCycle = 128; // FP16, dense (256 with sparsity)
+    } else if (deviceProp.major == 9) { // Hopper
+      flopsPerTensorCorePerCycle = 956.5; // FP16, dense (1913 with sparsity)
+    }
+
+    printf("  FLOPs per Tensor Core per Cycle (FP16, dense): %d\n", int(flopsPerTensorCorePerCycle));
+
+    // Calculate peak FP16 Tensor Core FLOPs
+    double peakFlops = (double)deviceProp.multiProcessorCount * tensorCoresPerSM * flopsPerTensorCorePerCycle * (deviceProp.clockRate * 1e3); // Hz
+    printf("  Peak FP16 Tensor Core FLOPs (dense):           %.2f TFLOPs\n", peakFlops * 1e-12);
+
     const char *sComputeMode[] = {
-        "Default (multiple host threads can use ::cudaSetDevice() with device "
-        "simultaneously)",
-        "Exclusive (only one host thread in one process is able to use "
-        "::cudaSetDevice() with this device)",
-        "Prohibited (no host thread can use ::cudaSetDevice() with this "
-        "device)",
-        "Exclusive Process (many threads in one process is able to use "
-        "::cudaSetDevice() with this device)",
-        "Unknown", NULL};
+      "Default (multiple host threads can use ::cudaSetDevice() with device "
+      "simultaneously)",
+      "Exclusive (only one host thread in one process is able to use "
+      "::cudaSetDevice() with this device)",
+      "Prohibited (no host thread can use ::cudaSetDevice() with this "
+      "device)",
+      "Exclusive Process (many threads in one process is able to use "
+      "::cudaSetDevice() with this device)",
+      "Unknown", NULL};
     printf("  Compute Mode:\n");
     printf("     < %s >\n", sComputeMode[deviceProp.computeMode]);
   }
