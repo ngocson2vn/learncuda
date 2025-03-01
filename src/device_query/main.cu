@@ -246,34 +246,27 @@ int main(int argc, char **argv) {
   //===========================================================================================
   // Tensor Core
   //===========================================================================================
-  // Manually define FLOPs per Tensor Core per Cycle (architecture-specific)
-  float flopsPerTensorCorePerCycle = 0;
-  if (deviceProp.major == 7 && deviceProp.minor == 0) { // Volta
-    flopsPerTensorCorePerCycle = 64; // FP16, dense
-  } else if (deviceProp.major == 7 && deviceProp.minor == 5) { // Turing
-    flopsPerTensorCorePerCycle = 64; // FP16, dense
+  // Manually define peak FP16 Tensor Core FLOPs (architecture-specific)
+  float peakFp16TensorCoreFlops = 0;
+  if (deviceProp.major == 7 && deviceProp.minor == 5) { // Turing
+    peakFp16TensorCoreFlops = 65 * 1e12f; // Mixed-Precision (FP16/FP32)
   } else if (deviceProp.major == 8) { // Ampere
-    flopsPerTensorCorePerCycle = 256; // FP16, dense (512 with sparsity)
+    peakFp16TensorCoreFlops = 125 * 1e12f; // FP16, dense (250 with sparsity)
   } else if (deviceProp.major == 9) { // Hopper
-    flopsPerTensorCorePerCycle = 956.5; // FP16, dense (1913 with sparsity)
+    peakFp16TensorCoreFlops = 1000 * 1e12f; // FP16, dense (2000 with sparsity)
   }
 
-  LOG(level, "  FLOPs per Tensor Core per Cycle (FP16, dense): %d\n", int(flopsPerTensorCorePerCycle));
-
-  // Calculate peak FP16 Tensor Core FLOPs
-  double peakFlops = (double)deviceProp.multiProcessorCount * tensorCoresPerSM;
-          peakFlops *= flopsPerTensorCorePerCycle * (deviceProp.clockRate * 1e3); // Hz
-  LOG(level, "  Peak FP16 Tensor Core FLOPs (dense):           %d TFLOPs\n", int(peakFlops * 1e-12 + 0.5));
-  dp.peakFp16TensorCoreFlops = peakFlops;
+  LOG(level, "  Peak FP16 Tensor Core FLOPs (dense):           %d TFLOPs\n", int(peakFp16TensorCoreFlops * 1e-12f));
+  dp.peakFp16TensorCoreFlops = peakFp16TensorCoreFlops;
   //===========================================================================================
 
   // Peak Memory Bandwidth (GB/s) = (Memory Clock Rate (Hz) * Memory Bus Width (bits) * Number of Transfers per Clock) / 8
-  double peakMemoryBw = (deviceProp.memoryClockRate * 1e3f * deviceProp.memoryBusWidth * 2) / (8 * 1e9f);
-  LOG(level, "  Peak Memory Bandwidth (GB/s):                  %d GB/s\n", int(peakMemoryBw + 0.5));
-  dp.peakMemoryBwBytesPerSec = peakMemoryBw * 1e9f;
+  double peakMemoryBwBytesPerSec = (deviceProp.memoryClockRate * 1e3f * deviceProp.memoryBusWidth * 2) / 8;
+  LOG(level, "  Peak Memory Bandwidth (GB/s):                  %d GB/s\n", int(peakMemoryBwBytesPerSec * 1e-9f + 0.5));
+  dp.peakMemoryBwBytesPerSec = peakMemoryBwBytesPerSec;
 
   // ops:byte ratio
-  double opsByteRatio = peakFlops / (peakMemoryBw * 1e9f);
+  double opsByteRatio = peakFp16TensorCoreFlops / peakMemoryBwBytesPerSec;
   LOG(level, "  Peak FP16 Tensor Core ops:byte ratio:          %d\n", int(opsByteRatio + 0.5));
 
   const char *sComputeMode[] = {
