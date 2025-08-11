@@ -90,6 +90,11 @@ tar -xf cudnn-linux-x86_64-8.9.7.29_cuda12-archive.tar.xz
 sudo rsync -avP cudnn-linux-x86_64-8.9.7.29_cuda12-archive/include/* /usr/local/cuda-12.4/include/
 sudo rsync -avP cudnn-linux-x86_64-8.9.7.29_cuda12-archive/lib/* /usr/local/cuda-12.4/lib64/
 
+## cuDNN 9
+wget https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/cudnn-linux-x86_64-9.12.0.46_cuda12-archive.tar.xz
+
+sudo rsync -avP cudnn-linux-x86_64-9.12.0.46_cuda12-archive/include/* /usr/local/cuda-12.4/include/
+sudo rsync -avP cudnn-linux-x86_64-9.12.0.46_cuda12-archive/lib/* /usr/local/cuda-12.4/lib64/
 
 ########################################################################################################################
 # NVCC

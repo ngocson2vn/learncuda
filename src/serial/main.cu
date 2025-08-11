@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <device_launch_parameters.h>
 
 #define CUDA_CHECK_ERROR(e)                                    \
@@ -45,7 +46,10 @@ __global__ void test_kernel() {
   // Initialize counter
   if (threadIdx.x == 0) {
     counter = -1;
+    std::memset(done, 0, 128);
   }
+
+  __syncthreads();
 
   // Wait for threadIdx.x - 1 to complete
   while (threadIdx.x > 0 && !done[threadIdx.x - 1]) {

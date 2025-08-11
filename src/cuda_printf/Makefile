@@ -15,12 +15,6 @@ $(info NVCC: $(cuda_version))
 
 .SUFFIXES: .o .cu
 
-test: test.o
-	g++ -L$(CUDA_LIB) -o test test.o -lcudart -ldl
-
-test.o: test.cu
-	$(NVCC) $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -c test.cu
-
 main: main.o
 	g++ -L$(CUDA_LIB) -o main main.o -lcudart -ldl
 
