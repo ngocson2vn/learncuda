@@ -29,6 +29,10 @@ rmmod nvidia
 # Step 4: If Used by > 0, then find processes still using /dev/nvidia*
 lsof | grep nvidia
 
+# After reinstallation of GPU driver, enable Persistence Mode
+# This will make GPU responsive
+nvidia-smi -pm 1
+
 ########################################################################################################################
 # Download cuda
 ########################################################################################################################
@@ -92,9 +96,12 @@ sudo rsync -avP cudnn-linux-x86_64-8.9.7.29_cuda12-archive/lib/* /usr/local/cuda
 
 ## cuDNN 9
 wget https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/cudnn-linux-x86_64-9.12.0.46_cuda12-archive.tar.xz
-
+tar -xf cudnn-linux-x86_64-9.12.0.46_cuda12-archive.tar.xz
 sudo rsync -avP cudnn-linux-x86_64-9.12.0.46_cuda12-archive/include/* /usr/local/cuda-12.4/include/
 sudo rsync -avP cudnn-linux-x86_64-9.12.0.46_cuda12-archive/lib/* /usr/local/cuda-12.4/lib64/
+
+## cuSPARSELt
+wget https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-x86_64/libcusparse_lt-linux-x86_64-0.8.0.4_cuda12-archive.tar.xz
 
 ########################################################################################################################
 # NVCC

@@ -392,3 +392,77 @@ https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#proxies
     printf("  Total amount of dynamic shared memory:         %zu bytes\n",
            deviceProp.sharedMemPerBlockOptin);
 ```
+
+# Warp Divergence
+---
+
+### **1. What is a Warp in CUDA?**
+
+* In CUDA, threads are grouped into **warps** of 32 threads.
+* All threads in a warp execute **in lockstep** on the GPU's SIMD-like hardware: they share the same program counter and execute the same instruction at the same time.
+
+---
+
+### **2. What is Warp Divergence?**
+
+* **Warp divergence** happens when threads in the same warp follow **different execution paths**, usually due to **branching (if/else, switch, loops with varying iterations, etc.)**.
+* Since all threads in a warp must execute the same instruction together, the GPU must **serialize divergent paths**.
+
+---
+
+### **3. Example**
+
+```cpp
+__global__ void divergence_example(int *data) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (tid % 2 == 0) {
+        // Path A: even threads
+        data[tid] = tid * 2;
+    } else {
+        // Path B: odd threads
+        data[tid] = tid * 3;
+    }
+}
+```
+
+* In each warp (32 threads), half are even, half are odd.
+* Threads split into **two execution paths**:
+
+  1. Execute Path A for even threads, while odd threads sit idle.
+  2. Execute Path B for odd threads, while even threads sit idle.
+* **Result:** warp takes \~2× longer than if all threads had followed the same branch.
+
+---
+
+### **4. Why is it a Problem?**
+
+* Divergence **reduces parallel efficiency**: the warp’s throughput is determined by the *longest path*, and inactive threads waste cycles.
+* Worst case: if all 32 threads take **different paths**, execution becomes fully serialized.
+
+---
+
+### **5. Key Insights**
+
+* Warp divergence only occurs **within a warp**. Different warps can diverge independently without hurting each other.
+* Structured, data-parallel code minimizes divergence.
+
+---
+
+### **6. Strategies to Reduce Divergence**
+
+* **Data reordering:** arrange data so that threads in the same warp follow the same branch.
+* **Predication:** replace branches with conditional assignments when possible:
+
+```cpp
+data[tid] = (tid % 2 == 0) ? tid * 2 : tid * 3;
+```
+
+* **Algorithm redesign:** avoid divergent control flow inside performance-critical kernels.
+* **Warp specialization:** assign entire warps to a specific task instead of mixing.
+
+---
+
+✅ **In short:** Warp divergence happens when threads in the same warp take different execution paths. The GPU then serializes those paths, leading to idle threads and performance loss.
+
+Would you like me to also explain **how modern NVIDIA compilers and hardware (Volta and later) partially mitigate warp divergence**?
