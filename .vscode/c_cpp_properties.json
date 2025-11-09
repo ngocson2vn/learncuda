@@ -4,7 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "/usr/include",
-                "/usr/local/cuda/include",
+                "/usr/local/cuda-12.2/include",
+                "/usr/local/cuda-12.2/targets/x86_64-linux/include",
                 "${workspaceFolder}/cutlass/include",
                 "${workspaceFolder}/cutlass/tools/util/include",
                 "${workspaceFolder}/src/**"
