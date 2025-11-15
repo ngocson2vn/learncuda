@@ -114,7 +114,8 @@
     "__assert": "cpp",
     "__nullptr": "cpp",
     "__undef_macros": "cpp",
-    "__verbose_abort": "cpp"
+    "__verbose_abort": "cpp",
+    "regex": "cpp"
   },
   "C_Cpp.errorSquiggles": "disabled"
 }

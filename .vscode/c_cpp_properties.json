@@ -12,9 +12,11 @@
             ],
             "defines": [
                 "GOOGLE_CUDA",
-                "CUTLASS_ARCH_MMA_SM90_SUPPORTED"
+                "CUTLASS_ARCH_MMA_SM90_SUPPORTED",
+                "__CUDACC__",
+                "__CUDA_ARCH__=900"
             ],
-            "compilerPath": "/usr/bin/gcc",
+            "compilerPath": "/usr/local/cuda-12.2/bin/nvcc",
             "cStandard": "c11",
             "cppStandard": "c++17",
             "intelliSenseMode": "${default}",
