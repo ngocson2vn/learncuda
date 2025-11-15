@@ -18,36 +18,36 @@ FILE* get_file_ptr(const char* file_path) {
 constexpr static int kMaxElement = 1000000;
 
 template <typename T>
-void fprint_mat(FILE* file_ptr, const char* name, T* a, const dim3& dims) {
+void fprint_mat(FILE* file_ptr, const char* name, T* a, const int shape[2], const int stride[2]) {
   // Header
   fprintf(file_ptr, "%s\n", name);
-  int num_chars = 8 + 7 * dims.y;
+  int num_chars = 8 + 7 * shape[1];
   fprintf(file_ptr, "%s\n", std::string(num_chars, '-').c_str());
   fprintf(file_ptr, "      j:");
-  for (size_t j = 0; j < dims.y; j++) {
+  for (size_t j = 0; j < shape[1]; j++) {
     fprintf(file_ptr, " %6d", j);
   }
   fprintf(file_ptr, "\n%s\n", std::string(num_chars, '-').c_str());
 
   // Body
-  for (size_t i = 0; i < dims.x; i++) {
+  for (size_t i = 0; i < shape[0]; i++) {
     fprintf(file_ptr, "i = %3d:", i);
-    for (size_t j = 0; j < dims.y; j++) {
-      fprintf(file_ptr, " %6.2f", (float)a[i + j * dims.x]);
-      if (j == kMaxElement && j < dims.y) {
-        fprintf(file_ptr, " ... %6.2f", (float)a[i + (dims.y - 1) * dims.x]);
+    for (size_t j = 0; j < shape[1]; j++) {
+      fprintf(file_ptr, " %6.2f", (float)a[i * stride[0] + j * stride[1]]);
+      if (j == kMaxElement && j < shape[1]) {
+        fprintf(file_ptr, " ... %6.2f", (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
         break;
       }
     }
     fprintf(file_ptr, "\n");
-    if (i == kMaxElement && i < dims.x) {
-      i = dims.x - 1;
+    if (i == kMaxElement && i < shape[0]) {
+      i = shape[0] - 1;
       fprintf(file_ptr, ".\n.\n.\n");
       fprintf(file_ptr, "i = %3d:", i);
-      for (size_t j = 0; j < dims.y; j++) {
-        fprintf(file_ptr, " %6.2f", (float)a[i + j * dims.x]);
-        if (j == kMaxElement && j < dims.y) {
-          fprintf(file_ptr, " ... %6.2f", (float)a[i + (dims.y - 1) * dims.x]);
+      for (size_t j = 0; j < shape[1]; j++) {
+        fprintf(file_ptr, " %6.2f", (float)a[i * stride[0] + j * stride[1]]);
+        if (j == kMaxElement && j < shape[1]) {
+          fprintf(file_ptr, " ... %6.2f", (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
           break;
         }
       }
@@ -57,41 +57,41 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const dim3& dims) {
 }
 
 template<>
-void fprint_mat<int>(FILE* file_ptr, const char* name, int* a, const dim3& dims) {
+void fprint_mat<int>(FILE* file_ptr, const char* name, int* a, const int shape[2], const int stride[2]) {
   constexpr int digits = 3;
   std::string format = " %" + std::to_string(digits) + "d";
 
   // Header
   fprintf(file_ptr, "%s\n", name);
-  int num_chars = 8 + (digits + 1) * dims.y;
+  int num_chars = 8 + (digits + 1) * shape[1];
   fprintf(file_ptr, "%s\n", std::string(num_chars, '-').c_str());
   fprintf(file_ptr, "      j:");
-  for (size_t j = 0; j < dims.y; j++) {
+  for (size_t j = 0; j < shape[1]; j++) {
     fprintf(file_ptr, format.c_str(), j);
   }
   fprintf(file_ptr, "\n%s\n", std::string(num_chars, '-').c_str());
 
   // Body
-  for (size_t i = 0; i < dims.x; i++) {
+  for (size_t i = 0; i < shape[0]; i++) {
     fprintf(file_ptr, "i = %3d:", i);
-    for (size_t j = 0; j < dims.y; j++) {
-      fprintf(file_ptr, format.c_str(), a[i + j * dims.x]);
-      if (j == kMaxElement && j < dims.y) {
+    for (size_t j = 0; j < shape[1]; j++) {
+      fprintf(file_ptr, format.c_str(), a[i * stride[0] + j * stride[1]]);
+      if (j == kMaxElement && j < shape[1]) {
         format = " ..." + format;
-        fprintf(file_ptr, format.c_str(), a[i + (dims.y - 1) * dims.x]);
+        fprintf(file_ptr, format.c_str(), a[i * stride[0] + (shape[1] - 1) * stride[1]]);
         break;
       }
     }
     fprintf(file_ptr, "\n");
-    if (i == kMaxElement && i < dims.x) {
-      i = dims.x - 1;
+    if (i == kMaxElement && i < shape[0]) {
+      i = shape[0] - 1;
       fprintf(file_ptr, ".\n.\n.\n");
       fprintf(file_ptr, "i = %3d:", i);
-      for (size_t j = 0; j < dims.y; j++) {
-        fprintf(file_ptr, format.c_str(), a[i + j * dims.x]);
-        if (j == kMaxElement && j < dims.y) {
+      for (size_t j = 0; j < shape[1]; j++) {
+        fprintf(file_ptr, format.c_str(), a[i * stride[0] + j * stride[1]]);
+        if (j == kMaxElement && j < shape[1]) {
           format = " ..." + format;
-          fprintf(file_ptr, format.c_str(), a[i + (dims.y - 1) * dims.x]);
+          fprintf(file_ptr, format.c_str(), a[i * stride[0] + (shape[1] - 1) * stride[1]]);
           break;
         }
       }
