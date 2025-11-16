@@ -4,6 +4,8 @@
 #include <cuda.h>
 #include <cuda_fp16.h>
 
+#include "fprint_mat.h"
+
 #define CUDA_CHECK_ERROR(e)                                    \
 do {                                                           \
   cudaError_t code = (e);                                      \
@@ -16,112 +18,22 @@ do {                                                           \
   }                                                            \
 } while (0)
 
-void gen_idx(int thread_idx) {
-  int base_row0 = thread_idx / 4;
-  int base_col  = thread_idx % 4;
-  
-  int idx00 = base_row0 * 32 + (base_col + 0 * 4) * 1;
-  int idx01 = base_row0 * 32 + (base_col + 1 * 4) * 1;
-  int idx02 = base_row0 * 32 + (base_col + 2 * 4) * 1;
-  int idx03 = base_row0 * 32 + (base_col + 3 * 4) * 1;
-  int idx04 = base_row0 * 32 + (base_col + 4 * 4) * 1;
-  int idx05 = base_row0 * 32 + (base_col + 5 * 4) * 1;
-  int idx06 = base_row0 * 32 + (base_col + 6 * 4) * 1;
-  int idx07 = base_row0 * 32 + (base_col + 7 * 4) * 1;
+void gen_indexes(std::size_t* indexes_tile_D, std::size_t* shape_tile_D, std::size_t* stride_tile_D, std::size_t thread_idx) {
+  int baseRow = (thread_idx / 4) + (thread_idx / 32) * 8;
+  int baseCol  = (thread_idx % 4) * 2;
+  int k = 0;
+  int idx = 0;
+  for (int i = 0; i < (shape_tile_D[0] / 32); i++) {
+    int fragment_idx = k;
+    for (int j = 0; j < (shape_tile_D[1] / 8); j++) {
+      idx = (baseRow + i * 8) * stride_tile_D[0] + (baseCol + j * 8) * stride_tile_D[1];
+      indexes_tile_D[fragment_idx]   = idx;
+      indexes_tile_D[fragment_idx+1] = idx + 1;
+      fragment_idx += 4;
+    }
 
-  int base_row1 = base_row0 + 8;
-  int idx08 = base_row1 * 32 + (base_col + 0 * 4) * 1;
-  int idx09 = base_row1 * 32 + (base_col + 1 * 4) * 1;
-  int idx10 = base_row1 * 32 + (base_col + 2 * 4) * 1;
-  int idx11 = base_row1 * 32 + (base_col + 3 * 4) * 1;
-  int idx12 = base_row1 * 32 + (base_col + 4 * 4) * 1;
-  int idx13 = base_row1 * 32 + (base_col + 5 * 4) * 1;
-  int idx14 = base_row1 * 32 + (base_col + 6 * 4) * 1;
-  int idx15 = base_row1 * 32 + (base_col + 7 * 4) * 1;
-
-  printf("idx00: %4d\n", idx00);
-  printf("idx01: %4d\n", idx01);
-  printf("idx02: %4d\n", idx02);
-  printf("idx03: %4d\n", idx03);
-  printf("idx04: %4d\n", idx04);
-  printf("idx05: %4d\n", idx05);
-  printf("idx06: %4d\n", idx06);
-  printf("idx07: %4d\n", idx07);
-  printf("idx08: %4d\n", idx08);
-  printf("idx09: %4d\n", idx09);
-  printf("idx10: %4d\n", idx10);
-  printf("idx11: %4d\n", idx11);
-  printf("idx12: %4d\n", idx12);
-  printf("idx13: %4d\n", idx13);
-  printf("idx14: %4d\n", idx14);
-  printf("idx15: %4d\n", idx15);
-}
-
-void gen_idx_v2(int thread_idx) {
-  int base_row0 = (thread_idx / 4) + (thread_idx / 32) * 8;
-  int base_col  = (thread_idx % 4) * 2;
-  
-  int idx00 = base_row0 * 64 + (base_col + 0 * 8) * 1;
-  int idx01 = idx00 + 1;
-
-  int idx02 = base_row0 * 64 + (base_col + 1 * 8) * 1;
-  int idx03 = idx02 + 1;
-
-  int idx04 = base_row0 * 64 + (base_col + 2 * 8) * 1;
-  int idx05 = idx04 + 1;
-
-  int idx06 = base_row0 * 64 + (base_col + 3 * 8) * 1;
-  int idx07 = idx06 + 1;
-
-  int idx08 = base_row0 * 64 + (base_col + 4 * 8) * 1;
-  int idx09 = idx08 + 1;
-
-  int idx10 = base_row0 * 64 + (base_col + 5 * 8) * 1;
-  int idx11 = idx10 + 1;
-
-  int idx12 = base_row0 * 64 + (base_col + 6 * 8) * 1;
-  int idx13 = idx12 + 1;
-
-  int idx14 = base_row0 * 64 + (base_col + 7 * 8) * 1;
-  int idx15 = idx14 + 1;
-
-  int base_row1 = base_row0 + 8;
-  int idx16 = base_row1 * 64 + (base_col + 0 * 8) * 1;
-  int idx17 = idx16 + 1;
-
-  int idx18 = base_row1 * 64 + (base_col + 1 * 8) * 1;
-  int idx19 = idx18 + 1;
-
-  int idx20 = base_row1 * 64 + (base_col + 2 * 8) * 1;
-  int idx21 = idx20 + 1;
-
-  int idx22 = base_row1 * 64 + (base_col + 3 * 8) * 1;
-  int idx23 = idx22 + 1;
-
-  int idx24 = base_row1 * 64 + (base_col + 4 * 8) * 1;
-  int idx25 = idx24 + 1;
-
-  int idx26 = base_row1 * 64 + (base_col + 5 * 8) * 1;
-  int idx27 = idx26 + 1;
-
-  int idx28 = base_row1 * 64 + (base_col + 6 * 8) * 1;
-  int idx29 = idx28 + 1;
-
-  int idx30 = base_row1 * 64 + (base_col + 7 * 8) * 1;
-  int idx31 = idx30 + 1;
-
-  printf("i = 0:");
-  printf(" %4d", idx00); printf(" %4d", idx01); printf(" %4d", idx02); printf(" %4d", idx03); 
-  printf(" %4d", idx04); printf(" %4d", idx05); printf(" %4d", idx06); printf(" %4d", idx07);
-  printf(" %4d", idx08); printf(" %4d", idx09); printf(" %4d", idx10); printf(" %4d", idx11);
-  printf(" %4d", idx12); printf(" %4d", idx13); printf(" %4d", idx14); printf(" %4d", idx15);
-  printf("\n");
-
-  printf("i = 1:");
-  printf(" %4d", idx16); printf(" %4d", idx17); printf(" %4d", idx18); printf(" %4d", idx19); 
-  printf(" %4d", idx20); printf(" %4d", idx21); printf(" %4d", idx22); printf(" %4d", idx23);
-  printf(" %4d", idx24); printf(" %4d", idx25); printf(" %4d", idx26); printf(" %4d", idx27);
-  printf(" %4d", idx28); printf(" %4d", idx29); printf(" %4d", idx30); printf(" %4d", idx31);
+    k += 2;
+  }
 }
 
 template<int M = 64, int K = 16>
@@ -143,12 +55,56 @@ __global__ void test_kernel() {
 }
 
 int main(int argc, char** argv) {
-  for (int i = 0; i < 128; i++) {
+  constexpr std::size_t M_TILE = 64;
+  constexpr std::size_t N_TILE = 64;
+  // std::size_t indexes_tile_D[M_TILE * N_TILE];
+  // for (std::size_t i = 0; i < M_TILE*N_TILE; i++) {
+  //   indexes_tile_D[i] = 0;
+  // }
+
+  // std::size_t shape_tile_D[] = {M_TILE, N_TILE};
+  // std::size_t stride_tile_D[] = {N_TILE, 1};
+  // std::string outputFile = "indexes_tile_D";
+  // for (int tid = 0; tid < 128; tid++) {
+  //   printf("========================\n");
+  //   printf("thread_idx = %4d\n", tid);
+  //   printf("========================\n");
+  //   gen_indexes(indexes_tile_D, shape_tile_D, stride_tile_D, tid);
+  //   std::string tmpOutput = outputFile + "_tid_" + std::to_string(tid) + ".txt";
+  //   FILE* file_ptr = get_file_ptr(tmpOutput.c_str());
+  //   fprint_mat(file_ptr, "indexes_tile_D", indexes_tile_D, shape_tile_D, stride_tile_D);
+  //   printf("\n\n");
+  // }
+
+  int fragment_size = 32;
+  std::size_t indexes_tile_D[fragment_size];
+  std::size_t shape_tile_D[] = {M_TILE, N_TILE};
+  std::size_t stride_tile_D[] = {N_TILE, 1};
+
+  const char* eformat = " %10d";
+
+  for (int tid = 0; tid < 128; tid++) {
     printf("========================\n");
-    printf("thread_idx = %4d\n", i);
+    printf("thread_idx = %4d\n", tid);
     printf("========================\n");
-    // gen_idx(i);
-    gen_idx_v2(i);
+
+    for (std::size_t i = 0; i < fragment_size; i++) {
+      indexes_tile_D[i] = 0;
+    }
+
+    gen_indexes(indexes_tile_D, shape_tile_D, stride_tile_D, tid);
+
+    int fragment_idx = 0;
+    for (int i = 0; i < 2; i++) {
+      fragment_idx = i * 2;
+      for (int j = 0; j < 8; j++) {
+        printf(eformat, indexes_tile_D[fragment_idx]);
+        printf(eformat, indexes_tile_D[fragment_idx + 1]);
+        fragment_idx += 4;
+      }
+      printf("\n");
+    }
+
     printf("\n\n");
   }
 
