@@ -26,8 +26,14 @@ Matrices in shared memory are organized into a number of smaller matrices called
 Matrix A is made up of 8x2 core matrices and Matrix B is made up of 2x(N/8) core matrices. This section describes the layout of the core matrices for each shape.
 
 <img src="./AB.png" width="50%"/><br/>
+
+Before we can execute wgmma PTX instruction to multiply two matrices sA and sB, we need to map their logical layouts to physical layouts as follows:<b/r>
+The first core matrix is mapped with the first 64 linear elements in shared memory.<br/>
+The second core matrix is mapped with next 64 linear elements in shared memory.<br/>
+So on and so forth.
+
+sA logical layout -> physical layout:<br/>
 ```
-sA layout:
    0    1    2    3    4    5    6    7     64   65   66   67   68   69   70   71 
    8    9   10   11   12   13   14   15     72   73   74   75   76   77   78   79 
   16   17   18   19   20   21   22   23     80   81   82   83   84   85   86   87 
@@ -99,9 +105,11 @@ sA layout:
  936  937  938  939  940  941  942  943   1000 1001 1002 1003 1004 1005 1006 1007 
  944  945  946  947  948  949  950  951   1008 1009 1010 1011 1012 1013 1014 1015 
  952  953  954  955  956  957  958  959   1016 1017 1018 1019 1020 1021 1022 1023 
+```
 
 
-sB layout:
+sB logical layout -> physical layout:
+```
    0    8   16   24   32   40   48   56    128  136  144  152  160  168  176  184    256  264  272  280  288  296  304  312    384  392  400  408  416  424  432  440    512  520  528  536  544  552  560  568    640  648  656  664  672  680  688  696    768  776  784  792  800  808  816  824    896  904  912  920  928  936  944  952 
    1    9   17   25   33   41   49   57    129  137  145  153  161  169  177  185    257  265  273  281  289  297  305  313    385  393  401  409  417  425  433  441    513  521  529  537  545  553  561  569    641  649  657  665  673  681  689  697    769  777  785  793  801  809  817  825    897  905  913  921  929  937  945  953 
    2   10   18   26   34   42   50   58    130  138  146  154  162  170  178  186    258  266  274  282  290  298  306  314    386  394  402  410  418  426  434  442    514  522  530  538  546  554  562  570    642  650  658  666  674  682  690  698    770  778  786  794  802  810  818  826    898  906  914  922  930  938  946  954 
@@ -120,6 +128,7 @@ sB layout:
   70   78   86   94  102  110  118  126    198  206  214  222  230  238  246  254    326  334  342  350  358  366  374  382    454  462  470  478  486  494  502  510    582  590  598  606  614  622  630  638    710  718  726  734  742  750  758  766    838  846  854  862  870  878  886  894    966  974  982  990  998 1006 1014 1022 
   71   79   87   95  103  111  119  127    199  207  215  223  231  239  247  255    327  335  343  351  359  367  375  383    455  463  471  479  487  495  503  511    583  591  599  607  615  623  631  639    711  719  727  735  743  751  759  767    839  847  855  863  871  879  887  895    967  975  983  991  999 1007 1015 1023 
 ```
+
 
 ### Matrix Descriptor Format
 https://docs.nvidia.com/cuda/parallel-thread-execution/#asynchronous-warpgroup-level-matrix-shared-memory-layout-matrix-descriptor

@@ -38,7 +38,7 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const int shape[2], cons
   for (size_t i = 0; i < shape[0]; i++) {
     fprintf(file_ptr, "i = %3d:", i);
     for (size_t j = 0; j < shape[1]; j++) {
-      fprintf(file_ptr, " %10.2f", (float)a[i * stride[0] + j * stride[1]]);
+      fprintf(file_ptr, "%7.2f", (float)a[i * stride[0] + j * stride[1]]);
       if (j == kMaxElement && j < shape[1]) {
         fprintf(file_ptr, " ... %10.2f", (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
         break;
@@ -50,7 +50,7 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const int shape[2], cons
       fprintf(file_ptr, ".\n.\n.\n");
       fprintf(file_ptr, "i = %3d:", i);
       for (size_t j = 0; j < shape[1]; j++) {
-        fprintf(file_ptr, " %10.2f", (float)a[i * stride[0] + j * stride[1]]);
+        fprintf(file_ptr, "%7.2f", (float)a[i * stride[0] + j * stride[1]]);
         if (j == kMaxElement && j < shape[1]) {
           fprintf(file_ptr, " ... %10.2f", (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
           break;

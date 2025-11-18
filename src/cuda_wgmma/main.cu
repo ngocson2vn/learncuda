@@ -328,7 +328,7 @@ __device__ uint64_t create_desc(DataType* smem_ptr) {
   // matrix-descriptor-encode(x)
   auto mde = [](uint64_t x) -> uint64_t { return ((x & 0x3FFFF) >> 0x4); };
 
-  uint64_t smem_addr = mde(reinterpret_cast<uint64_t>(smem_ptr));
+  uint64_t smem_addr = mde(static_cast<uint64_t>(__cvta_generic_to_shared(smem_ptr)));
 
   // Matrix start address: bits 13-0
   desc = desc | smem_addr;
@@ -365,17 +365,42 @@ __device__ int* gen_indexes(int thread_idx, int* stride_d) {
   return D_indexes;
 }
 
+// https://docs.nvidia.com/cuda/parallel-thread-execution/#matrix-fragments-for-wgmma-mma-async-m64nnk16
+__device__ void gen_indices_tile_D(int* indexes_tile_D, const int* shape_tile_D, const int* stride_tile_D, int thread_idx) {
+  int baseRow = (thread_idx / 4) + (thread_idx / 32) * 8;
+  int baseCol  = (thread_idx % 4) * 2;
+  int k = 0;
+  int idx = 0;
+  for (int m = 0; m < (shape_tile_D[0] / 32); m++) {
+    int fragment_idx = k;
+    for (int n = 0; n < (shape_tile_D[1] / 8); n++) {
+      idx = (baseRow + m * 8) * stride_tile_D[0] + (baseCol + n * 8) * stride_tile_D[1];
+      indexes_tile_D[fragment_idx]   = idx;
+      indexes_tile_D[fragment_idx+1] = idx + 1;
+      fragment_idx += 4;
+    }
+
+    k += 2;
+  }
+}
+
 template <typename DType, typename ABType, int M, int N, int K>
 __global__ void wgmma_kernel(
   DType* gD,
   ABType* gA,
   ABType* gB,
+  const __grid_constant__ CUtensorMap tensor_map_D,
   const __grid_constant__ CUtensorMap tensor_map_A,
   const __grid_constant__ CUtensorMap tensor_map_B)
 {
   __shared__ alignas(128) ABType sA[M * K];
   __shared__ alignas(128) ABType sB[N * K];
+  __shared__ alignas(128) DType tile_D[M * N];
   __shared__ alignas(8) uint64_t mbar;
+
+  constexpr int size_tile_D = M * N;
+  constexpr int shape_tile_D[] = {M, N};
+  constexpr int stride_tile_D[] = {N, 1};
 
   constexpr int kTmaTransactionBytes = M * K * sizeof(ABType) + N * K * sizeof(ABType);
   int warp_idx = canonical_warp_idx_sync();
@@ -412,55 +437,45 @@ __global__ void wgmma_kernel(
 
   mbarrier_wait(&mbar, 0);
 
+  int tid = threadIdx.x;
+
+#if 1
+  if (tid == 0) {
+    int idx = 0;
+    printf("tile_A: M_TILE: %d, K_TILE: %d\n", M, K);
+    for (int m = 0; m < M; m++) {
+      printf("m = %2d: ", m);
+      for (int k = 0; k < K; k++) {
+        idx = m * K + k;
+        printf("%7.2f", (float)sA[idx]);
+      }
+      printf("\n");
+    }
+
+    printf("\n\n");
+
+    printf("tile_B: K_TILE: %d, N_TILE: %d\n", K, N);
+    for (int k = 0; k < K; k++) {
+      printf("k = %2d: ", k);
+      for (int n = 0; n < N; n++) {
+        idx = k + n * K;
+        printf("%7.2f", (float)sB[idx]);
+      }
+      printf("\n");
+    }
+  }
+#endif
+
   // Create matrix descriptors
   uint64_t desc_a = create_desc<ABType>(&sA[0]);
   uint64_t desc_b = create_desc<ABType>(&sB[0]);
 
-  int shape_d[] = {M, N};
-  int stride_d[] = {N, 1};
-  int* D_indexes = gen_indexes(threadIdx.x, stride_d);
-
-  int idx00 = D_indexes[0];
-  int idx01 = D_indexes[1];
-  int idx02 = D_indexes[2];
-  int idx03 = D_indexes[3];
-  int idx04 = D_indexes[4];
-  int idx05 = D_indexes[5];
-  int idx06 = D_indexes[6];
-  int idx07 = D_indexes[7];
-  int idx08 = D_indexes[8];
-  int idx09 = D_indexes[9];
-  int idx10 = D_indexes[10];
-  int idx11 = D_indexes[11];
-  int idx12 = D_indexes[12];
-  int idx13 = D_indexes[13];
-  int idx14 = D_indexes[14];
-  int idx15 = D_indexes[15];
-  int idx16 = D_indexes[16];
-  int idx17 = D_indexes[17];
-  int idx18 = D_indexes[18];
-  int idx19 = D_indexes[19];
-  int idx20 = D_indexes[20];
-  int idx21 = D_indexes[21];
-  int idx22 = D_indexes[22];
-  int idx23 = D_indexes[23];
-  int idx24 = D_indexes[24];
-  int idx25 = D_indexes[25];
-  int idx26 = D_indexes[26];
-  int idx27 = D_indexes[27];
-  int idx28 = D_indexes[28];
-  int idx29 = D_indexes[29];
-  int idx30 = D_indexes[30];
-  int idx31 = D_indexes[31];
-
-  // Clear gD
-  for (int i = 0; i < N/2; i++) {
-    int idx = D_indexes[i];
-    gD[idx] = DType(0);
+  // Accumulators for each thread
+  DType acc[32];
+  #pragma unroll
+  for (int i = 0; i < 32; ++i) {
+    acc[i] = DType(0);
   }
-
-  // Make the generic proxy operations visible to the async proxy
-  fence_proxy_async();
 
   // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
   // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
@@ -470,11 +485,12 @@ __global__ void wgmma_kernel(
 
   // Issue WGMMA operation
   MMA_64x64x16_F32F16F16_SS mma_atom;
+
   mma_atom.fma(
-    gD[idx00], gD[idx01], gD[idx02], gD[idx03], gD[idx04], gD[idx05], gD[idx06], gD[idx07],
-    gD[idx08], gD[idx09], gD[idx10], gD[idx11], gD[idx12], gD[idx13], gD[idx14], gD[idx15],
-    gD[idx16], gD[idx17], gD[idx18], gD[idx19], gD[idx20], gD[idx21], gD[idx22], gD[idx23],
-    gD[idx24], gD[idx25], gD[idx26], gD[idx27], gD[idx28], gD[idx29], gD[idx30], gD[idx31],
+    acc[0],  acc[1],  acc[2],  acc[3],  acc[4],  acc[5],  acc[6],  acc[7],
+    acc[8],  acc[9],  acc[10], acc[11], acc[12], acc[13], acc[14], acc[15],
+    acc[16], acc[17], acc[18], acc[19], acc[20], acc[21], acc[22], acc[23],
+    acc[24], acc[25], acc[26], acc[27], acc[28], acc[29], acc[30], acc[31],
     desc_a,
     desc_b
   );
@@ -483,6 +499,45 @@ __global__ void wgmma_kernel(
 
   // Wait for MMA op to complete
   warpgroup_wait<0>();
+
+  // Epilogue: write acc to tile_D
+  // Map acc indices -> tile D indices
+  int indices_tile_D[32];
+  gen_indices_tile_D(indices_tile_D, shape_tile_D, stride_tile_D, tid);
+
+  // Copy fragments stored in acc to tile_D
+  // Each thread contributes 32 fragments
+  for (int i = 0; i < 32; i++) {
+    int idx = indices_tile_D[i];
+    tile_D[idx] = acc[i];
+  }
+
+  fence_proxy_async();
+
+  // Ensure that writes by all threads are visible to TMA engine.
+  __syncthreads();
+
+  // Finally, copy tile_D back to D in global memory
+  if (tid == 0) {
+    int col_D = 0;
+    int row_D = 0;
+    cp_async_bulk_tensor_2d_shared_to_global(
+      &tensor_map_D,
+      col_D,
+      row_D,
+      tile_D
+    );
+
+    // Ref1: https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#completion-mechanisms-for-asynchronous-copy-operations
+    // Ref2: https://docs.nvidia.com/cuda/parallel-thread-execution/#data-movement-and-conversion-instructions-cp-async-bulk-commit-group
+    // Create a "bulk async-group" out of the previous bulk copy operation.
+    // Purpose: for tracking the completion of this group
+    cp_async_bulk_commit_group();
+
+    // Wait for all the asynchronous operations belonging to the bulk async-group are complete.
+    // `0` means the executing thread waits on all the prior bulk async-groups to complete.
+    cp_async_bulk_wait_group_read<0>();
+  }
 }
 
 template <typename DType, typename ABType, int M, int N, int K>
@@ -551,7 +606,8 @@ int main(int argc, char** argv) {
   fprintf(file_ptr, "\n\n");
 
 
-  printf("sA layout:\n");
+  printf("\n\n\n\n");
+  printf("sA index mapping:\n\n");
   for (int i = 0; i < M; i++) {
     if (i > 0 && i % 8 == 0) {
       printf("\n");
@@ -568,7 +624,7 @@ int main(int argc, char** argv) {
   }
   printf("\n\n");
 
-  printf("sB layout:\n");
+  printf("sB index mapping:\n\n");
   for (int i = 0; i < K; i++) {
     if (i > 0 && i % 8 == 0) {
       printf("\n");
@@ -607,6 +663,8 @@ int main(int argc, char** argv) {
   cudaMalloc((void**)&d_D, M * N * sizeof(DType));
 
     // Create tensor map
+  CUtensorMap tensor_map_D{};
+  create_tensor_map<DType, M, N, true>(&tensor_map_D, d_D);
   CUtensorMap tensor_map_A{};
   create_tensor_map<ABType, M, K, true>(&tensor_map_A, d_A);
   CUtensorMap tensor_map_B{};
@@ -637,6 +695,7 @@ int main(int argc, char** argv) {
         d_D,
         d_A,
         d_B,
+        tensor_map_D,
         tensor_map_A,
         tensor_map_B
       )
@@ -660,5 +719,6 @@ int main(int argc, char** argv) {
       ng++;
     }
   }
+  printf("\n");
   printf("D: %d ok, %d ng\n", ok, ng);
 }
