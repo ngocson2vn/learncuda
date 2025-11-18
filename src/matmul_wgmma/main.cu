@@ -160,10 +160,6 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress) {
   // dim0 = column
   // dim1 = row
   uint64_t globalDim[tensorRank] = {COLS, ROWS};
-  // if constexpr(!rowMajor) {
-  //   globalDim[0] = ROWS;
-  //   globalDim[1] = COLS;
-  // }
 
   // The stride is the number of bytes to traverse from the first element of one row to the next.
   // It must be a multiple of 16.
@@ -173,10 +169,6 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress) {
   // The boxDim is the size of the shared memory buffer that is used as the
   // destination of a TMA transfer.
   uint32_t boxDim[tensorRank] = {BOX_COLS, BOX_ROWS};
-  // if constexpr(!rowMajor) {
-  //   boxDim[0] = BOX_ROWS;
-  //   boxDim[1] = BOX_COLS;
-  // }
 
   // The distance between elements in units of sizeof(element). A stride of 2
   // can be used to load only the real component of a complex-valued tensor, for instance.
