@@ -30,7 +30,7 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const char indices[2], c
   fprintf(file_ptr, "%s\n", std::string(num_chars, '-').c_str());
   fprintf(file_ptr, "      %c:", indices[1]);
   for (int j = 0; j < shape[1]; j++) {
-    fprintf(file_ptr, " %10d", j);
+    fprintf(file_ptr, "%7d", j);
   }
   fprintf(file_ptr, "\n%s\n", std::string(num_chars, '-').c_str());
 
@@ -38,9 +38,9 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const char indices[2], c
   for (int i = 0; i < shape[0]; i++) {
     fprintf(file_ptr, "%c = %3d:", indices[0], i);
     for (int j = 0; j < shape[1]; j++) {
-      fprintf(file_ptr, " %10.2f", (float)a[i * stride[0] + j * stride[1]]);
+      fprintf(file_ptr, "%7.2f", (float)a[i * stride[0] + j * stride[1]]);
       if (j == kMaxElement && j < shape[1]) {
-        fprintf(file_ptr, " ... %10.2f", (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
+        fprintf(file_ptr, " ... %7.2f", (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
         break;
       }
     }
@@ -50,9 +50,9 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const char indices[2], c
       fprintf(file_ptr, ".\n.\n.\n");
       fprintf(file_ptr, "%c = %3d:", indices[0], i);
       for (int j = 0; j < shape[1]; j++) {
-        fprintf(file_ptr, " %10.2f", (float)a[i * stride[0] + j * stride[1]]);
+        fprintf(file_ptr, "%7.2f", (float)a[i * stride[0] + j * stride[1]]);
         if (j == kMaxElement && j < shape[1]) {
-          fprintf(file_ptr, " ... %10.2f", (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
+          fprintf(file_ptr, " ... %7.2f", (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
           break;
         }
       }
