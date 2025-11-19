@@ -449,6 +449,11 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     mbarrier_arrive_and_expect_tx_bytes(&mbar_A, bytes_tile_A);
     mbarrier_arrive_and_expect_tx_bytes(&mbar_B, bytes_tile_B);
 
+    // 
+    // NOTE: TMA loads are asynchronous proxy operations.
+    // They write into double_tile_A/B in the current stage.
+    // 
+
     // Load tile_A
     tma_load_tile_A(stage_tile_A(stage), /*k_tile=*/0);
 
@@ -460,9 +465,16 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   __syncthreads();
 
   // Wait for both tiles to be ready before first compute
-  // NOTE: after TMA transactions have finished, both current phases will be advanced to 1
+  // NOTE: after TMA transactions have finished, both mbar's current phases will be advanced to 1
+  // The mbarrier_wait() only guarantees that the transaction count has been satisfied and 
+  // the data is in shared memory somewhere — but not necessarily visible to all threads in the CTA yet.
   mbarrier_wait(&mbar_A, /*phaseParity=*/stage);
   mbarrier_wait(&mbar_B, /*phaseParity=*/stage);
+
+  // This fence makes the loaded data globally visible to the CTA.
+  // Only after this fence are the normal stores in copy_tile_A/B guaranteed 
+  // to read the up-to-date data from double_tile_A/B.
+  fence_proxy_async();
 
   // Create a MMA atom
   MMA_64x64x16_F32F16F16_SS mma_atom;
@@ -481,9 +493,6 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
       tma_load_tile_B(stage_tile_B(next_stage), next_k);
     }
 
-    // Ensures that all prior async operations that target shared memory (TMA loads) are made visible to the CTA
-    fence_proxy_async();
-
     // !!! IMPORTANT !!!
     // Before executing wgmma, we need to copy double_tile_A -> tile_A and double_tile_B -> tile_B
     // so that tile_A and tile_B have exact layouts as described here
@@ -491,8 +500,8 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     copy_tile_A(stage_tile_A(stage), tid);
     copy_tile_B(stage_tile_B(stage), tid);
 
-    // Ensure that all threads see the same tile_A and tile_B
-    __syncthreads();
+    // Ensure that writes to tile_A and tile_B are visible to WGMMA
+    fence_proxy_async();
 
     // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
     // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
@@ -522,13 +531,10 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
       stage = next_stage;
     }
 
-    // This ensures that ALL warps have finished reading tile_A/B via WGMMA
-    // before ANY warp starts overwriting them in the next iteration's copy_tile step.
-    // __syncthreads();
+    // Ensure that WGMMA finishes reading shared memory tile_A and tile_B
+    // Ensure that TMA-loaded double_tile_A and double_tile_B are globally visible inside the CTA
+    fence_proxy_async();
   }
-
-  // Ensures that all prior async operations that target shared memory (WGMMA) are made visible to the CTA
-  fence_proxy_async();
 
   // Epilogue: write acc to tile_D
   // Map acc indices -> tile D indices
