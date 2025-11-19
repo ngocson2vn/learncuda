@@ -500,7 +500,10 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     copy_tile_A(stage_tile_A(stage), tid);
     copy_tile_B(stage_tile_B(stage), tid);
 
-    // Ensure that writes to tile_A and tile_B are visible to WGMMA
+    // Ensure that all threads finish updating tile_A and tile_B
+    __syncthreads();
+
+    // Make tile_A and tile_B visible to WGMMA
     fence_proxy_async();
 
     // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
@@ -547,6 +550,12 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     int idx = indices_tile_D[i];
     tile_D[idx] = acc[i];
   }
+
+  // Ensure that all threads finish updating tile_D
+  __syncthreads();
+
+  // Make tile_D visible to TMA engine
+  fence_proxy_async();
 
   // Finally, copy tile_D back to D in global memory
   if (tid == 0) {
@@ -611,12 +620,10 @@ void matmul_cpu_tile(ABType* mat_A, int stride_A[2], ABType* mat_B, int stride_B
 template <typename ABType, typename DType, int M, int N, int K, int M_TILE, int N_TILE>
 void matmul_cpu_parallel(ABType* mat_A, int stride_A[2], ABType* mat_B, int stride_B[2], DType* mat_D, int stride_D[2]) {
   std::vector<std::thread> threads;
-  for (int m_start = 0; m_start < M / M_TILE; m_start++) {
-    for (int n_start = 0; n_start < N / N_TILE; n_start++) {
-      threads.push_back(
-        std::thread(
-          matmul_cpu_tile<ABType, DType, M, N, K, M_TILE, N_TILE>, mat_A, stride_A, mat_B, stride_B, mat_D, stride_D, m_start, n_start
-        )
+  for (int m_tile = 0; m_tile < M / M_TILE; m_tile++) {
+    for (int n_tile = 0; n_tile < N / N_TILE; n_tile++) {
+      threads.emplace_back(
+        matmul_cpu_tile<ABType, DType, M, N, K, M_TILE, N_TILE>, mat_A, stride_A, mat_B, stride_B, mat_D, stride_D, m_tile * M_TILE, n_tile * N_TILE
       );
     }
   }
@@ -633,9 +640,11 @@ template <typename T>
 void verify(T* cpu_data, T* gpu_data, int start_idx, int numElements) {
   int ok = 0;
   int ng = 0;
+  constexpr T EPSILON = 1.0e-3;
   for (int i = 0; i < numElements; i++) {
-    int idx = start_idx + i;    
-    if (cpu_data[idx] == gpu_data[idx]) {
+    int idx = start_idx + i;
+    T diff = std::abs(cpu_data[idx] - gpu_data[idx]);
+    if (diff < EPSILON) {
       ok++;
     } else {
       ng++;
@@ -644,7 +653,7 @@ void verify(T* cpu_data, T* gpu_data, int start_idx, int numElements) {
 
   g_ok.fetch_add(ok);
   if (ng > 0) {
-    g_ok.fetch_add(ng);
+    g_ng.fetch_add(ng);
   }
 }
 
@@ -670,11 +679,10 @@ int main(int argc, char** argv) {
   constexpr int N_TILE = 64;
   constexpr int K_TILE = 16;
 
-  constexpr int MNScale = 32;
-  constexpr int KScale = 32;
-  constexpr int M = M_TILE * MNScale;
-  constexpr int N = N_TILE * MNScale;
-  constexpr int K = K_TILE * KScale;
+  constexpr int scale = 64;
+  constexpr int M = M_TILE * scale;
+  constexpr int N = N_TILE * scale;
+  constexpr int K = K_TILE * scale;
 
   // Init cuda
   device_init(0);
@@ -746,7 +754,8 @@ int main(int argc, char** argv) {
 
   std::random_device rd;  // Will be used to obtain a seed for the random number engine
   std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
-  std::uniform_int_distribution<int> dist(1, 3);
+  std::uniform_int_distribution<int> dist(0, 3);
+  // std::uniform_real_distribution<float> dist(0.0, 1.0);
 
   FILE* file_ptr = nullptr;
 
@@ -817,18 +826,7 @@ int main(int argc, char** argv) {
     // Reset global counters
     g_ok = 0;
     g_ng = 0;
-
-    std::vector<std::thread> threads;
-    int numElements = (M * N) / 1024;
-    for (int i = 0; i < 1024; i++) {
-      int start_idx = i * numElements;
-      threads.push_back(std::thread(verify<DType>, h_D_cpu.data(), h_D_gpu.data(), start_idx, numElements));
-    }
-
-    for (auto& t : threads) {
-      t.join();
-    }
-
+    verify<DType>(h_D_cpu.data(), h_D_gpu.data(), 0, M * N);
     printf("D: ok: %d ng: %d\n\n", g_ok.fetch_add(0), g_ng.fetch_add(0));
 
     round_ok += (g_ng == 0 ? 1 : 0);
