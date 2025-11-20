@@ -631,7 +631,8 @@ template <typename ABType, typename DType, int M_TILE, int N_TILE>
 void matmul_cpu_parallel(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int stride_B[2], int stride_D[2], int M, int N, int K) {
   const int M_TILE_COUNT = M / M_TILE;
   const int N_TILE_COUNT = N / N_TILE;
-  const int total_batches = M_TILE_COUNT * N_TILE_COUNT / MAX_THREAD_COUNT;
+  const int total_tiles = M_TILE_COUNT * N_TILE_COUNT;
+  const int total_batches = total_tiles / MAX_THREAD_COUNT + ((total_tiles % MAX_THREAD_COUNT) > 0 ? 1 : 0);
   printf("Total batches of tiles to be processed: %d\n", total_batches);
 
   std::vector<std::thread> threads;
@@ -646,9 +647,9 @@ void matmul_cpu_parallel(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_
         for (auto& t : threads) {
           t.join();
         }
-        threads.clear();
         batch_count++;
-        printf("Done batch %d\n", batch_count);
+        printf("Done processing batch %d of %d tiles\n", batch_count, threads.size());
+        threads.clear();
       }
     }
   }
@@ -658,7 +659,7 @@ void matmul_cpu_parallel(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_
       t.join();
     }
     batch_count++;
-    printf("Done batch %d\n", batch_count);
+    printf("Done processing batch %d of %d tiles\n", batch_count, threads.size());
   }
 }
 
@@ -856,6 +857,7 @@ int main(int argc, char** argv) {
     matmul_cpu_parallel<ABType, DType, M_TILE, N_TILE>(h_A.data(), h_B.data(), h_D_cpu.data(), stride_A, stride_B, stride_D, M, N, K);
 
     if (!perf_mode) {
+      printf("Dumping cpu and gpu D matrices\n");
       const char indices_D[] = {'m', 'n'};
       fprint_mat(file_ptr, "h_D_cpu", h_D_cpu.data(), indices_D, shape_D, stride_D);
       fprintf(file_ptr, "\n\n");
@@ -863,9 +865,10 @@ int main(int argc, char** argv) {
     }
 
     // Verify
+    printf("Verifying matrix D\n");
+    fflush(stdout);
     // Reset global counters
-    g_ok = 0;
-    g_ng = 0;
+    g_ok = 0; g_ng = 0;
     std::vector<std::thread> verifyThreads;
     const int kNumElements = (M * N) / MAX_THREAD_COUNT;
     for (int i = 0; i < MAX_THREAD_COUNT; i++) {
@@ -876,7 +879,7 @@ int main(int argc, char** argv) {
     for (auto& t : verifyThreads) {
       t.join();
     }
-    printf("D: ok: %d ng: %d\n\n", g_ok.fetch_add(0), g_ng.fetch_add(0));
+    printf("Matrix D: ok: %d ng: %d\n\n", g_ok.fetch_add(0), g_ng.fetch_add(0));
 
     round_ok += (g_ng == 0 ? 1 : 0);
     round_ng += (g_ng != 0 ? 1 : 0);
