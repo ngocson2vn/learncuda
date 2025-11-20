@@ -20,8 +20,8 @@ using bf16_t = nv_bfloat16;
 
 // #define DEBUG
 
-#if defined(DEBUG)
 static std::mutex log_mutex;
+#if defined(DEBUG)
 #define LOG_DEBUG(format_str, ...)            \
 do {                                          \
   std::lock_guard<std::mutex> lk(log_mutex);  \
@@ -31,6 +31,13 @@ do {                                          \
 #else
 #define LOG_DEBUG(format_str, ...)
 #endif
+
+#define LOG_ERROR(format_str, ...)            \
+do {                                          \
+  std::lock_guard<std::mutex> lk(log_mutex);  \
+  printf("ERROR ");                           \
+  printf(format_str, ##__VA_ARGS__);          \
+} while(0)
 
 
 __device__ void warpgroup_arrive()
@@ -166,8 +173,8 @@ struct MMA_64x64x16_F32F16F16_SS
 };
 
 
-template<typename DataType, int ROWS, int COLS, int BOX_ROWS, int BOX_COLS, int swizzleMode = 0>
-bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress) {
+template<typename DataType, int swizzleMode = 0>
+bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, unsigned int ROWS, unsigned int COLS, unsigned int BOX_ROWS, unsigned int BOX_COLS) {
   // tensorRank is the number of dimensions of the array.
   constexpr uint32_t tensorRank = 2;
 
@@ -260,7 +267,7 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress) {
   }
 
   LOG_DEBUG("Successfully created CUtensorMap object: ROWS=%d COLS=%d BOX_ROWS=%d BOX_COLS=%d\n",
-         ROWS, COLS, BOX_ROWS, BOX_COLS);
+            ROWS, COLS, BOX_ROWS, BOX_COLS);
   return true;
 }
 
@@ -319,11 +326,12 @@ __device__ void gen_indices(int* indexes_tile_D, const int* shape_tile_D, const 
 // gemm_tma_wgmma_bf16_fp32
 /*===---------------------------------------------------------------------------------------------------------------===*/
 // Kernel uses TMA mbarriers (64B) and smem
-template <typename ABType, typename DType, int M, int N, int K, int M_TILE, int N_TILE, int K_TILE>
+template <typename ABType, typename DType, int M_TILE, int N_TILE, int K_TILE>
 __global__ void gemm_tma_wgmma_bf16_fp32(
   const __grid_constant__ CUtensorMap tensor_map_A,
   const __grid_constant__ CUtensorMap tensor_map_B,
-  const __grid_constant__ CUtensorMap tensor_map_D
+  const __grid_constant__ CUtensorMap tensor_map_D,
+  int M, int N, int K
 ) {
 #if __CUDA_ARCH__ < 900
   return; // requires SM90
@@ -585,8 +593,8 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
 // Dmn = sum_k(Amk * Bkn) = sum_k(Amk * tBnk) = sum_k(A[m * K + k] * tB[n * K + k])
 // where, tB is transposed B
 // mat_B must be pre-transposed as (N, K):(K, 1)
-template <typename ABType, typename DType, int M, int N, int K>
-void matmul_cpu(ABType* mat_A, int stride_A[2], ABType* mat_B, int stride_B[2], DType* mat_D, int stride_D[2]) {
+template <typename ABType, typename DType>
+void matmul_cpu(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int stride_B[2], int stride_D[2], int M, int N, int K) {
   for (int m = 0; m < M; m++) {
     for (int n = 0; n < N; n++) {
       int idx = m * stride_D[0] + n * stride_D[1];
@@ -600,8 +608,8 @@ void matmul_cpu(ABType* mat_A, int stride_A[2], ABType* mat_B, int stride_B[2], 
 }
 
 
-template <typename ABType, typename DType, int M, int N, int K, int M_TILE, int N_TILE>
-void matmul_cpu_tile(ABType* mat_A, int stride_A[2], ABType* mat_B, int stride_B[2], DType* mat_D, int stride_D[2], int m_start, int n_start) {
+template <typename ABType, typename DType, int M_TILE, int N_TILE>
+void matmul_cpu_tile(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int stride_B[2], int stride_D[2], int M, int N, int K, int m_start, int n_start) {
   std::vector<std::thread> threads;
   for (int i = 0; i < M_TILE; i++) {
     int m = m_start + i;
@@ -617,19 +625,40 @@ void matmul_cpu_tile(ABType* mat_A, int stride_A[2], ABType* mat_B, int stride_B
   }
 }
 
-template <typename ABType, typename DType, int M, int N, int K, int M_TILE, int N_TILE>
-void matmul_cpu_parallel(ABType* mat_A, int stride_A[2], ABType* mat_B, int stride_B[2], DType* mat_D, int stride_D[2]) {
+constexpr unsigned int MAX_THREAD_COUNT = 1024;
+
+template <typename ABType, typename DType, int M_TILE, int N_TILE>
+void matmul_cpu_parallel(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int stride_B[2], int stride_D[2], int M, int N, int K) {
+  const int M_TILE_COUNT = M / M_TILE;
+  const int N_TILE_COUNT = N / N_TILE;
+  const int total_batches = M_TILE_COUNT * N_TILE_COUNT / MAX_THREAD_COUNT;
+  printf("Total batches of tiles to be processed: %d\n", total_batches);
+
   std::vector<std::thread> threads;
-  for (int m_tile = 0; m_tile < M / M_TILE; m_tile++) {
-    for (int n_tile = 0; n_tile < N / N_TILE; n_tile++) {
+  int batch_count = 0;
+  for (int m_tile = 0; m_tile < M_TILE_COUNT; m_tile++) {
+    for (int n_tile = 0; n_tile < N_TILE_COUNT; n_tile++) {
       threads.emplace_back(
-        matmul_cpu_tile<ABType, DType, M, N, K, M_TILE, N_TILE>, mat_A, stride_A, mat_B, stride_B, mat_D, stride_D, m_tile * M_TILE, n_tile * N_TILE
+        matmul_cpu_tile<ABType, DType, M_TILE, N_TILE>, mat_A, mat_B, mat_D, stride_A, stride_B, stride_D, M, N, K, m_tile * M_TILE, n_tile * N_TILE
       );
+
+      if (threads.size() == MAX_THREAD_COUNT) {
+        for (auto& t : threads) {
+          t.join();
+        }
+        threads.clear();
+        batch_count++;
+        printf("Done batch %d\n", batch_count);
+      }
     }
   }
 
-  for (auto& t : threads) {
-    t.join();
+  if (threads.size() > 0) {
+    for (auto& t : threads) {
+      t.join();
+    }
+    batch_count++;
+    printf("Done batch %d\n", batch_count);
   }
 }
 
@@ -665,24 +694,35 @@ int main(int argc, char** argv) {
   using DType = float;
   using ABType = bf16_t;
 
-  bool perf_mode = false;
+  int tile_count = 4;
   if (argc > 1) {
-    perf_mode = std::atoi(argv[1]) == 1;
+    tile_count = std::atoi(argv[1]);
+  }
+
+  if (tile_count <= 0) {
+    LOG_ERROR("Tile count must be a positive integer: %d\n", tile_count);
+    std::exit(1);
+  }
+
+  bool perf_mode = false;
+  if (argc > 2) {
+    perf_mode = std::atoi(argv[2]) == 1;
   }
 
   int max_round_count = 0;
   if (perf_mode) {
-    max_round_count = 100;
+    max_round_count = 3;
   }
 
   constexpr int M_TILE = 64;
   constexpr int N_TILE = 64;
   constexpr int K_TILE = 16;
 
-  constexpr int scale = 64;
-  constexpr int M = M_TILE * scale;
-  constexpr int N = N_TILE * scale;
-  constexpr int K = K_TILE * scale;
+  const int M = M_TILE * tile_count;
+  const int N = N_TILE * tile_count;
+  const int K = K_TILE * tile_count;
+
+  assert(tile_count <= 1024 && "Tile count must be less than 1024");
 
   // Init cuda
   device_init(0);
@@ -710,19 +750,19 @@ int main(int argc, char** argv) {
 
   // Create tensor maps
   CUtensorMap tensor_map_A{};
-  bool status_A = create_tensor_map<ABType, M, K, M_TILE, K_TILE, 0>(&tensor_map_A, d_A_ptr);
+  bool status_A = create_tensor_map<ABType, 0>(&tensor_map_A, d_A_ptr, M, K, M_TILE, K_TILE);
   if (!status_A) {
     return EXIT_FAILURE;
   }
 
   CUtensorMap tensor_map_B{};
-  bool status_B = create_tensor_map<ABType, K, N, K_TILE, N_TILE, 0>(&tensor_map_B, d_B_ptr);
+  bool status_B = create_tensor_map<ABType, 0>(&tensor_map_B, d_B_ptr, K, N, K_TILE, N_TILE);
   if (!status_B) {
     return EXIT_FAILURE;
   }
 
   CUtensorMap tensor_map_D{};
-  bool status_D = create_tensor_map<DType, M, N, M_TILE, N_TILE, 0>(&tensor_map_D, d_D_ptr);
+  bool status_D = create_tensor_map<DType, 0>(&tensor_map_D, d_D_ptr, M, N, M_TILE, N_TILE);
   if (!status_D) {
     return EXIT_FAILURE;
   }
@@ -798,10 +838,9 @@ int main(int argc, char** argv) {
     CUDA_CHECK_ERROR(
       cudaLaunchKernelEx(
         &config,
-        gemm_tma_wgmma_bf16_fp32<ABType, DType, M, N, K, M_TILE, N_TILE, K_TILE>,
-        tensor_map_A,
-        tensor_map_B,
-        tensor_map_D
+        gemm_tma_wgmma_bf16_fp32<ABType, DType, M_TILE, N_TILE, K_TILE>,
+        tensor_map_A, tensor_map_B, tensor_map_D,
+        M, N, K
       )
     );
     printf("Launched gemm_tma_wgmma_bf16_fp32\n");
@@ -813,7 +852,8 @@ int main(int argc, char** argv) {
     printf("Synchronize device done\n");
 
     // CPU
-    matmul_cpu_parallel<ABType, DType, M, N, K, M_TILE, N_TILE>(h_A.data(), stride_A, h_B.data(), stride_B, h_D_cpu.data(), stride_D);
+    printf("Run matmul_cpu_parallel\n");
+    matmul_cpu_parallel<ABType, DType, M_TILE, N_TILE>(h_A.data(), h_B.data(), h_D_cpu.data(), stride_A, stride_B, stride_D, M, N, K);
 
     if (!perf_mode) {
       const char indices_D[] = {'m', 'n'};
@@ -826,7 +866,16 @@ int main(int argc, char** argv) {
     // Reset global counters
     g_ok = 0;
     g_ng = 0;
-    verify<DType>(h_D_cpu.data(), h_D_gpu.data(), 0, M * N);
+    std::vector<std::thread> verifyThreads;
+    const int kNumElements = (M * N) / MAX_THREAD_COUNT;
+    for (int i = 0; i < MAX_THREAD_COUNT; i++) {
+      int idx_start = i * kNumElements;
+      verifyThreads.emplace_back(verify<DType>, h_D_cpu.data(), h_D_gpu.data(), idx_start, kNumElements);
+    }
+    
+    for (auto& t : verifyThreads) {
+      t.join();
+    }
     printf("D: ok: %d ng: %d\n\n", g_ok.fetch_add(0), g_ng.fetch_add(0));
 
     round_ok += (g_ng == 0 ? 1 : 0);
