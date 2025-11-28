@@ -16,7 +16,7 @@
                 "__CUDACC__",
                 "__CUDA_ARCH__=900"
             ],
-            "compilerPath": "/usr/local/cuda-12.2/bin/nvcc",
+            "compilerPath": "/usr/bin/g++",
             "cStandard": "c11",
             "cppStandard": "c++17",
             "intelliSenseMode": "${default}",

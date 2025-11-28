@@ -74,6 +74,6 @@ int main(int argc, char** argv) {
   std::cout << "zzz_msk = " << std::bitset<16>(((1 << num_bits) - 1) << num_base - 0) << std::endl;
   std::cout << "msk_sft = " << num_shft << std::endl;
 
-  sony::Swizzle<num_bits, num_base, num_shft> s;
-  std::cout << "s(offset) = " << s(offset) << std::endl;
+  sony::Swizzle<num_bits, num_base, num_shft> swizzle;
+  std::cout << "swizzle(offset) = " << swizzle(offset) << std::endl;
 }

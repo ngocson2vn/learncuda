@@ -1,5 +1,4 @@
 main
-hopper
 test
 *.o
 .vscode/vc.*

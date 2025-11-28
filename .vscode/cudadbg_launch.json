@@ -60,6 +60,61 @@
               "text": "directory ${workspaceFolder}"
           }
       ]
+    },
+    {
+      "name": "cute_wgmma",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cutlass_examples/hopper/main",
+      "cwd": "${workspaceFolder}/src/cutlass_examples/hopper",
+      "args": [],
+      "stopAtEntry": false,
+      "environment": [
+          {
+              "name": "TF_CPP_MAX_VLOG_LEVEL",
+              "value": "0"
+          },
+          {
+              "name": "CUDA_VISIBLE_DEVICES",
+              "value": "0"
+          }
+      ],
+      "miDebuggerArgs": "-x '${workspaceFolder}/gdb.conf'",
+      "setupCommands": [
+          {
+              "description": "",
+              //Configure the search path of the code file here, such as the path where the workspace can be configured in the blade project
+              "text": "directory ${workspaceFolder}"
+          }
+      ]
+    },
+    {
+      "name": "cute_test",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cutlass_examples/hopper/test",
+      "cwd": "${workspaceFolder}/src/cutlass_examples/hopper",
+      "args": [],
+      "stopAtEntry": false,
+      "environment": [],
+      "miDebuggerArgs": "-x '${workspaceFolder}/gdb.conf'",
+      "setupCommands": [
+          {
+              "description": "",
+              //Configure the search path of the code file here, such as the path where the workspace can be configured in the blade project
+              "text": "directory ${workspaceFolder}"
+          }
+      ]
+    },
+    {
+      "name": "cute_lldb",
+      "type": "lldb-dap",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/cutlass_examples/hopper/test",
+      "args": [],
+      "env": {
+        "FOO": "1",
+      }
     }
   ]
 }

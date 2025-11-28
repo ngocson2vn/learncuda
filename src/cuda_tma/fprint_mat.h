@@ -18,7 +18,7 @@ FILE* get_file_ptr(const char* file_path) {
 constexpr static int kMaxElement = 1000000;
 
 template <typename T>
-void fprint_mat(FILE* file_ptr, const char* name, T* a, const int shape[2], const int stride[2]) {
+void fprint_mat(FILE* file_ptr, const char* name, T* a, const uint shape[2], const uint stride[2]) {
   // Header
   fprintf(file_ptr, "%s\n", name);
   int num_chars = 8 + 7 * shape[1];
@@ -57,7 +57,7 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const int shape[2], cons
 }
 
 template<>
-void fprint_mat<int>(FILE* file_ptr, const char* name, int* a, const int shape[2], const int stride[2]) {
+void fprint_mat<int>(FILE* file_ptr, const char* name, int* a, const uint shape[2], const uint stride[2]) {
   constexpr int digits = 3;
   std::string format = " %" + std::to_string(digits) + "d";
 

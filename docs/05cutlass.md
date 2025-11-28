@@ -139,6 +139,9 @@ In the CUTLASS paradigm for MMA, the `cute::gemm` method is designed to expose a
 - The fragments `tCrA`, `tCrB`, and `tCrC` are constructed as thread-level partitions of the data using the `TiledMMA` object, and as such have WGMMA-specific layouts that the programmer should be aware of.
 - The fragments `tCrA` (if sourcing operand `A` from SMEM) and `tCrB` aren't register-backed tensors whose values are copied from SMEM, but rather matrix descriptors constructed on top of SMEM.
 
+**GMMA**: Group MMA<br/>
+GMMA operation (Group MMA) first introduced with Hopper architecture. These MMA instructions operate at the granularity of 128 threads (4 warps), which are collectively referred to as a warpgroup.
+
 ## MMA Atom: `MMA_64x64x16_F16F16F16_SS`
 cutlass/include/cute/arch/mma_sm90_gmma.hpp
 

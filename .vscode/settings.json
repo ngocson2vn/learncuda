@@ -115,7 +115,11 @@
     "__nullptr": "cpp",
     "__undef_macros": "cpp",
     "__verbose_abort": "cpp",
-    "regex": "cpp"
+    "regex": "cpp",
+    "cstdbool": "cpp",
+    "__functional_03": "cpp",
+    "__functional_base_03": "cpp"
   },
-  "C_Cpp.errorSquiggles": "disabled"
+  "C_Cpp.errorSquiggles": "disabled",
+  "C_Cpp.default.compilerPath": "/usr/bin/g++"
 }

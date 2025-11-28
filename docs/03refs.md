@@ -1,9 +1,18 @@
+# Reading Queue
+Understanding CuTe Swizzling - The Math Behind 32B, 64B, and 128B Patterns<br/>
+https://veitner.bearblog.dev/understanding-cute-swizzling-the-math-behind-32b-64b-and-128b-patterns/
+
+Inside NVIDIA GPUs: Anatomy of high performance matmul kernels<br/>
+https://www.aleksagordic.com/blog/matmul
+
 # Blogs
 https://siboehm.com/articles/22/CUDA-MMM
 
 https://cudaforfun.substack.com/p/outperforming-cublas-on-h100-a-worklog?utm_campaign=post&utm_medium=web
 
 https://0mean1sigma.com/author/tushar/
+
+https://www.aleksagordic.com/blog/matmul
 
 Markdown and LaTeX
 https://ashki23.github.io/markdown-latex.html
