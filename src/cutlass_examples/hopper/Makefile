@@ -1,34 +1,35 @@
-CUDA_INCLUDE = /usr/local/cuda/include
+CUDA_INCLUDE = /usr/local/cuda-12.2/include
+CUTLASS_INCLUDE = ../../../cutlass/include
+CUTLASS_UTIL_INCLUDE = ../../../cutlass/tools/util/include
 CXX=/usr/local/cuda/bin/nvcc
 CXXFLAGS=-std=c++17 -g -O0
 
 # Suppress note: The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6
-CXXFLAGS+= -Xcompiler -Wno-psabi
-
+CXXFLAGS+= -Xcompiler "-Wno-psabi -fno-inline-functions"
+CXXFLAGS+= -lineinfo
 CXXFLAGS+= --generate-code=arch=compute_90a,code=sm_90a
 CXXFLAGS+= --expt-relaxed-constexpr -D__CUDA_ARCH_FEAT_SM90_ALL
-CXXFLAGS+= -I$(CUDA_INCLUDE)
+CXXFLAGS+= -I$(CUDA_INCLUDE) -I$(CUTLASS_INCLUDE) -I$(CUTLASS_UTIL_INCLUDE)
+ALL_INCLUDE = -I$(CUDA_INCLUDE) -I$(CUTLASS_INCLUDE) -I$(CUTLASS_UTIL_INCLUDE)
 
-LDLIBS=-lcuda
+LIB_DIRS=-L/usr/local/cuda-12.2/lib64
+LDLIBS=-lcudart -lcuda
 
 .SUFFIXES: .o .cu
 
-default: clean main_v2
+default: clean test
 
-main: main.o
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main.o $(LDLIBS)
+main: clean wgmma_tma_sm90.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(LIB_DIRS) -o $@ wgmma_tma_sm90.o $(LDLIBS)
 
-main.o: device.h fprint_mat.h main.cu
-	$(CXX) -c $(CXXFLAGS) -o "$@" main.cu
+wgmma_tma_sm90.o: fprint_mat.h wgmma_tma_sm90.cu
+	$(CXX) -c $(CXXFLAGS) -o "$@" wgmma_tma_sm90.cu
 
-main_v2: main_v2.o
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main_v2.o $(LDLIBS)
-
-main_v2.o: device.h fprint_mat.h main_v2.cu
-	$(CXX) -c $(CXXFLAGS) -o "$@" main_v2.cu
-
-test: fprint_mat.h test.cu
-	$(NVCC) $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -o test test.cu
+test: clean_test
+	clang++ -std=c++17 -g -O0 -fno-inline $(ALL_INCLUDE) -o test test.cpp
 
 clean:
-	rm -rvf *.o main
+	rm -rvf *.o main test
+
+clean_test:
+	rm -rvf test.o test
