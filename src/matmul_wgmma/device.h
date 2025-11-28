@@ -38,7 +38,7 @@ void device_init(int device_id, bool quiet = false) {
   }
 
   if (!quiet) {
-    printf("Using device %d: %s  (SM%d, %d SMs)\n",
+    printf("Using device %d: %s  (SM%d, %d SMs)\n\n",
            device_id, device_prop.name,
            device_prop.major * 10 + device_prop.minor,
            device_prop.multiProcessorCount);

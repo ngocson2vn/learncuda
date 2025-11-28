@@ -13,7 +13,7 @@ LDLIBS=-lcuda
 
 .SUFFIXES: .o .cu
 
-default: clean main
+default: clean main_v2
 
 main: main.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main.o $(LDLIBS)
@@ -21,8 +21,20 @@ main: main.o
 main.o: device.h fprint_mat.h main.cu
 	$(CXX) -c $(CXXFLAGS) -o "$@" main.cu
 
+main_flops: main_flops.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main_flops.o $(LDLIBS)
+
+main_flops.o: device.h fprint_mat.h main_flops.cu
+	$(CXX) -c $(CXXFLAGS) -o "$@" main_flops.cu
+
+main_v2: main_v2.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main_v2.o $(LDLIBS)
+
+main_v2.o: device.h fprint_mat.h main_v2.cu
+	$(CXX) -c $(CXXFLAGS) -o "$@" main_v2.cu
+
 test: fprint_mat.h test.cu
 	$(NVCC) $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -o test test.cu
 
 clean:
-	rm -rvf *.o main
+	rm -rvf *.o main main_flops main_v2

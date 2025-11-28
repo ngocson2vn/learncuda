@@ -19,10 +19,8 @@
 
 using bf16_t = nv_bfloat16;
 
-// #define DEBUG
-
-static std::mutex log_mutex;
 #if defined(DEBUG)
+static std::mutex log_mutex;
 #define LOG_DEBUG(format_str, ...)            \
 do {                                          \
   std::lock_guard<std::mutex> lk(log_mutex);  \
@@ -32,14 +30,6 @@ do {                                          \
 #else
 #define LOG_DEBUG(format_str, ...)
 #endif
-
-#define LOG_ERROR(format_str, ...)            \
-do {                                          \
-  std::lock_guard<std::mutex> lk(log_mutex);  \
-  printf("ERROR ");                           \
-  printf(format_str, ##__VA_ARGS__);          \
-} while(0)
-
 
 __device__ void warpgroup_arrive()
 {
@@ -588,105 +578,6 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     cp_async_bulk_wait_group_read<0>();
   }
 }
-/*===---------------------------------------------------------------------------------------------------------------===*/
-
-
-// Dmn = sum_k(Amk * Bkn) = sum_k(Amk * tBnk) = sum_k(A[m * K + k] * tB[n * K + k])
-// where, tB is transposed B
-// mat_B must be pre-transposed as (N, K):(K, 1)
-template <typename ABType, typename DType>
-void matmul_cpu(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int stride_B[2], int stride_D[2], int M, int N, int K) {
-  for (int m = 0; m < M; m++) {
-    for (int n = 0; n < N; n++) {
-      int idx = m * stride_D[0] + n * stride_D[1];
-      for (int k = 0; k < K; k++) {
-        auto mat_A_mk = static_cast<DType>(mat_A[m * stride_A[0] + k * stride_A[1]]);
-        auto mat_B_kn = static_cast<DType>(mat_B[k * stride_B[0] + n * stride_B[1]]);
-        mat_D[idx] += mat_A_mk * mat_B_kn;
-      }
-    }
-  }
-}
-
-
-template <typename ABType, typename DType, int M_TILE, int N_TILE>
-void matmul_cpu_tile(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int stride_B[2], int stride_D[2], int M, int N, int K, int m_start, int n_start) {
-  std::vector<std::thread> threads;
-  for (int i = 0; i < M_TILE; i++) {
-    int m = m_start + i;
-    for (int j = 0; j < N_TILE; j++) {
-      int n = n_start + j;
-      int idx = m * stride_D[0] + n * stride_D[1];
-      for (int k = 0; k < K; k++) {
-        auto mat_A_mk = static_cast<DType>(mat_A[m * stride_A[0] + k * stride_A[1]]);
-        auto mat_B_kn = static_cast<DType>(mat_B[k * stride_B[0] + n * stride_B[1]]);
-        mat_D[idx] += mat_A_mk * mat_B_kn;
-      }
-    }
-  }
-}
-
-constexpr unsigned int MAX_THREAD_COUNT = 1024;
-
-template <typename ABType, typename DType, int M_TILE, int N_TILE>
-void matmul_cpu_parallel(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int stride_B[2], int stride_D[2], int M, int N, int K) {
-  const int M_TILE_COUNT = M / M_TILE;
-  const int N_TILE_COUNT = N / N_TILE;
-  const int total_tiles = M_TILE_COUNT * N_TILE_COUNT;
-  const int total_batches = total_tiles / MAX_THREAD_COUNT + ((total_tiles % MAX_THREAD_COUNT) > 0 ? 1 : 0);
-  printf("Total batches of tiles to be processed: %d\n", total_batches);
-
-  std::vector<std::thread> threads;
-  int batch_count = 0;
-  for (int m_tile = 0; m_tile < M_TILE_COUNT; m_tile++) {
-    for (int n_tile = 0; n_tile < N_TILE_COUNT; n_tile++) {
-      threads.emplace_back(
-        matmul_cpu_tile<ABType, DType, M_TILE, N_TILE>, mat_A, mat_B, mat_D, stride_A, stride_B, stride_D, M, N, K, m_tile * M_TILE, n_tile * N_TILE
-      );
-
-      if (threads.size() == MAX_THREAD_COUNT) {
-        for (auto& t : threads) {
-          t.join();
-        }
-        batch_count++;
-        printf("Done processing batch %d of %d tiles\n", batch_count, threads.size());
-        threads.clear();
-      }
-    }
-  }
-
-  if (threads.size() > 0) {
-    for (auto& t : threads) {
-      t.join();
-    }
-    batch_count++;
-    printf("Done processing batch %d of %d tiles\n", batch_count, threads.size());
-  }
-}
-
-static std::atomic<int> g_ok(0);
-static std::atomic<int> g_ng(0);
-
-template <typename T>
-void verify(T* cpu_data, T* gpu_data, int start_idx, int numElements) {
-  int ok = 0;
-  int ng = 0;
-  constexpr T EPSILON = 1.0e-3;
-  for (int i = 0; i < numElements; i++) {
-    int idx = start_idx + i;
-    T diff = std::abs(cpu_data[idx] - gpu_data[idx]);
-    if (diff < EPSILON) {
-      ok++;
-    } else {
-      ng++;
-    }
-  }
-
-  g_ok.fetch_add(ok);
-  if (ng > 0) {
-    g_ng.fetch_add(ng);
-  }
-}
 
 
 /*===---------------------------------------------------------------------------------------------------------------===*/
@@ -696,51 +587,32 @@ int main(int argc, char** argv) {
   using DType = float;
   using ABType = bf16_t;
 
-  int tile_count = 4;
+  int max_round_count = 100;
   if (argc > 1) {
-    tile_count = std::atoi(argv[1]);
+    max_round_count = std::atoi(argv[1]);
   }
-
-  if (tile_count <= 0) {
-    LOG_ERROR("Tile count must be a positive integer: %d\n", tile_count);
-    std::exit(1);
-  }
-
-  int max_round_count = 1;
-  if (argc > 2) {
-    max_round_count = std::atoi(argv[2]);
-  }
-
 
   constexpr int M_TILE = 64;
   constexpr int N_TILE = 64;
   constexpr int K_TILE = 16;
 
-  const int M = M_TILE * tile_count;
-  const int N = N_TILE * tile_count;
-  const int K = K_TILE * tile_count;
-
-  assert(tile_count <= 1024 && "Tile count must be less than 1024");
-
-  const bool perf_mode = max_round_count > 1;
+  const int M = 512;
+  const int N = 256;
+  const int K = 1024;
 
   // Init cuda
   device_init(0);
 
-  int shape_A[] = {M, K};
   int stride_A[] = {K, 1};
   thrust::host_vector<ABType> h_A(M * K);
   thrust::device_vector<ABType> d_A(M * K);
   auto d_A_ptr = d_A.data().get();
 
-  int shape_B[] = {K, N};
   int stride_B[] = {N, 1};
   thrust::host_vector<ABType> h_B(K * N);
   thrust::device_vector<ABType> d_B(K * N);
   auto d_B_ptr = d_B.data().get();
 
-  int shape_D[] = {M, N};
-  int stride_D[] = {N, 1};
   thrust::device_vector<DType> d_D(M * N, DType(0));
   auto d_D_ptr = d_D.data().get();
 
@@ -786,54 +658,41 @@ int main(int argc, char** argv) {
   int gridY = N / N_TILE;
   config.gridDim = dim3(gridX, gridY, 1);
 
-  // Threadblock: 128 threads (4 warps) for one warp-group
+    // Threadblock: 128 threads (4 warps) for one warp-group
   constexpr int THREADS_PER_BLOCK = 128;
   config.blockDim = dim3(THREADS_PER_BLOCK);
   config.stream = stream;
 
   std::random_device rd;  // Will be used to obtain a seed for the random number engine
   std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
-  std::uniform_int_distribution<int> dist(0, 3);
-  // std::uniform_real_distribution<float> dist(0.0, 1.0);
+  std::uniform_real_distribution<float> dist(0.0, 1.0);
 
-  FILE* file_ptr = nullptr;
+  double gflops = (2.0 * M * N * K) * 1e-9;
+  GPU_Clock timer;
 
-  int round_ok = 0;
-  int round_ng = 0;
-  int round_counter = 0;
-  do {
-    // Reset D matrices
-    std::fill(h_D_cpu.begin(), h_D_cpu.end(), DType(0));
-    std::fill(h_D_gpu.begin(), h_D_gpu.end(), DType(0));
+  // Reset D matrices
+  std::fill(h_D_cpu.begin(), h_D_cpu.end(), DType(0));
+  std::fill(h_D_gpu.begin(), h_D_gpu.end(), DType(0));
 
-    for (int m = 0; m < M; m++) {
-      for (int k = 0; k < K; k++) {
-        h_A[m * stride_A[0] + k * stride_A[1]] = ABType(dist(gen));
-      }
-    }
-
+  for (int m = 0; m < M; m++) {
     for (int k = 0; k < K; k++) {
-      for (int n = 0; n < N; n++) {
-        h_B[k * stride_B[0] + n * stride_B[1]] = ABType(dist(gen));
-      }
+      h_A[m * stride_A[0] + k * stride_A[1]] = ABType(dist(gen));
     }
+  }
 
-    if (!perf_mode) {
-      file_ptr = get_file_ptr("output.txt");
-      const char indices_A[] = {'m', 'k'};
-      fprint_mat(file_ptr, "h_A", h_A.data(), indices_A, shape_A, stride_A);
-      fprintf(file_ptr, "\n\n");
-
-      const char indices_B[] = {'k', 'n'};
-      fprint_mat(file_ptr, "h_B", h_B.data(), indices_B, shape_B, stride_B);
-      fprintf(file_ptr, "\n\n");
+  for (int k = 0; k < K; k++) {
+    for (int n = 0; n < N; n++) {
+      h_B[k * stride_B[0] + n * stride_B[1]] = ABType(dist(gen));
     }
+  }
 
-    // Transfer data from host to device
-    d_A = h_A;
-    d_B = h_B;
+  // Transfer data from host to device
+  d_A = h_A;
+  d_B = h_B;
 
-    // Launch wgmma_kernel
+  // Check FLOPS
+  timer.start();
+  for (int i = 0; i < max_round_count; i++) {
     CUDA_CHECK_ERROR(
       cudaLaunchKernelEx(
         &config,
@@ -842,47 +701,11 @@ int main(int argc, char** argv) {
         M, N, K
       )
     );
-    printf("Launched gemm_tma_wgmma_bf16_fp32\n");
-
-    // Copy output matrix
-    cudaMemcpyAsync(h_D_gpu.data(), d_D_ptr, M * N * sizeof(DType), cudaMemcpyDeviceToHost, stream);
 
     CUDA_CHECK_ERROR(cudaDeviceSynchronize());
-    printf("Synchronize device done\n");
+  }
 
-    // CPU
-    printf("Run matmul_cpu_parallel\n");
-    matmul_cpu_parallel<ABType, DType, M_TILE, N_TILE>(h_A.data(), h_B.data(), h_D_cpu.data(), stride_A, stride_B, stride_D, M, N, K);
-
-    if (!perf_mode) {
-      printf("Dumping cpu and gpu D matrices\n");
-      const char indices_D[] = {'m', 'n'};
-      fprint_mat(file_ptr, "h_D_cpu", h_D_cpu.data(), indices_D, shape_D, stride_D);
-      fprintf(file_ptr, "\n\n");
-      fprint_mat(file_ptr, "h_D_gpu", h_D_gpu.data(), indices_D, shape_D, stride_D);
-    }
-
-    // Verify
-    printf("Verifying matrix D\n");
-    fflush(stdout);
-    // Reset global counters
-    g_ok = 0; g_ng = 0;
-    std::vector<std::thread> verifyThreads;
-    const int kNumElements = (M * N) / MAX_THREAD_COUNT;
-    for (int i = 0; i < MAX_THREAD_COUNT; i++) {
-      int idx_start = i * kNumElements;
-      verifyThreads.emplace_back(verify<DType>, h_D_cpu.data(), h_D_gpu.data(), idx_start, kNumElements);
-    }
-    
-    for (auto& t : verifyThreads) {
-      t.join();
-    }
-    printf("Matrix D: OK=%d NG=%d\n\n", g_ok.fetch_add(0), g_ng.fetch_add(0));
-
-    round_ok += (g_ng == 0 ? 1 : 0);
-    round_ng += (g_ng != 0 ? 1 : 0);
-    round_counter++;
-  } while(round_counter < max_round_count);
-
-  printf("ROUND_OK=%d ROUND_NG=%d\n", round_ok, round_ng);
+  double gemm_time = timer.seconds() / max_round_count;
+  printf("GEMM time: %6.4f ms\n", gemm_time * 1000);
+  printf("GEMM FLOPS: %6.1f GFLOPS\n", gflops / gemm_time);
 }

@@ -15,7 +15,6 @@
 #include <thrust/device_vector.h>
 
 #include "fprint_mat.h"
-#include "util/GPU_Clock.hpp"
 
 using bf16_t = nv_bfloat16;
 
@@ -182,20 +181,20 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, unsigned int
   // In CUDA, 
   // dim0 = column
   // dim1 = row
-  uint64_t globalDim[tensorRank] = {COLS, ROWS};
+  uint64_t globalDim[] = {ROWS, COLS, 1, 1, 1};
 
   // The stride is the number of bytes to traverse from the first element of one row to the next.
   // It must be a multiple of 16.
-  uint64_t globalStrides[tensorRank - 1] = {COLS * sizeof(DataType)};
-  LOG_DEBUG("globalStrides[0] = %ld\n", globalStrides[0]);
+  uint64_t globalStrides[] = {sizeof(DataType), ROWS * sizeof(DataType), 0, 0, 0};
+  // LOG_DEBUG("globalStrides[0] = %ld\n", globalStrides[0]);
 
   // The boxDim is the size of the shared memory buffer that is used as the
   // destination of a TMA transfer.
-  uint32_t boxDim[tensorRank] = {BOX_COLS, BOX_ROWS};
+  uint32_t boxDim[] = {BOX_ROWS, BOX_COLS, 1, 1, 1};
 
   // The distance between elements in units of sizeof(element). A stride of 2
   // can be used to load only the real component of a complex-valued tensor, for instance.
-  uint32_t elementStrides[tensorRank] = {1, 1};
+  uint32_t elementStrides[] = {1, 1, 1, 1, 1};
 
   CUtensorMapDataType tensorDataType;
   if constexpr(std::is_same<DataType, int>()) {
@@ -235,7 +234,7 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, unsigned int
     tensorRank,                 // cuuint32_t tensorRank,
     globalAddress,              // void *globalAddress,
     globalDim,                  // const cuuint64_t *globalDim,
-    globalStrides,              // const cuuint64_t *globalStrides,
+    globalStrides + 1,          // const cuuint64_t *globalStrides,
     boxDim,                     // const cuuint32_t *boxDim,
     elementStrides,             // const cuuint32_t *elementStrides,
 
@@ -281,38 +280,73 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, unsigned int
 // Core matrix A(8x8): Each row is made up of eight .f16/ .bf16 elements.
 // Core matrix B(8x8): Each column is made up of eight .f16/ .bf16 elements.
 template<typename DataType>
-__device__ uint64_t create_matrix_desc(void* smem_ptr) {
+__device__ uint64_t create_matrix_desc(void* smem_ptr, uint64_t offset) {
   uint64_t desc = 0;
 
   // matrix-descriptor-encode(x)
   auto mde = [](uint64_t x) -> uint64_t { return ((x & 0x3FFFF) >> 0x4); };
 
-  uint64_t smem_addr = mde(static_cast<uint64_t>(__cvta_generic_to_shared(smem_ptr)));
+  uint64_t smem_addr = mde(static_cast<uint64_t>(__cvta_generic_to_shared(smem_ptr))) + offset;
 
-  // Matrix start address: bits 13-0
+  // Matrix start address: bits 13-0 (14 bits)
   desc = desc | smem_addr;
 
-  // Leading dimension byte offset: bits 29–16
-  uint64_t ld_byte_offset = mde(8 * 8 * sizeof(DataType)) << 16;
+  // Leading dimension byte offset: bits 29–16 (14 bits)
+  // uint64_t ld_byte_offset = mde(8 * 8 * sizeof(DataType)) << 16;
+  uint64_t ld_byte_offset = 0;
   desc = desc | ld_byte_offset;
 
-  // Stride dimension byte offset: bits 45–32
-  uint64_t sd_byte_offset = mde(2 * 8 * 8 * sizeof(DataType)) << 32;
+  // Stride dimension byte offset: bits 45–32 (14 bits)
+  // uint64_t sd_byte_offset = mde(2 * 8 * 8 * sizeof(DataType)) << 32;
+  uint64_t sd_byte_offset = uint64_t(128) << 32;
   desc = desc | sd_byte_offset;
+
+  // Matrix base offset: bits 51–49 (3 bits)
+  // This is valid for all swizzling modes except the no-swizzle mode.
+
+  // Swizzle mode to be used: bits 63–62 (2 bits)
+  uint64_t swizzle_mode = uint64_t(1) << 62;
+  desc = desc | swizzle_mode;
+
+  // 
+  // Double check
+  // 
+
+  if (threadIdx.x == 0) {
+    // start_address: bits 13-0 (14 bits)
+    uint64_t mask0 = 0x0000000000003FFF;
+    printf("start_address: 0x%04lx\n", desc & mask0);
+
+    // ld_byte_offset: bits 29–16 (14 bits)
+    uint64_t mask1 = 0x000000003FFF0000;
+    printf("ld_byte_offset: 0x%04lx\n", (desc & mask1) >> 16);
+
+    // sd_byte_offset: bits 45–32 (14 bits)
+    uint64_t mask2 = 0x00003FFF00000000;
+    printf("sd_byte_offset: 0x%04lx\n", (desc & mask2) >> 32);
+
+    // base_offset: bits 51–49 (3 bits)
+    uint64_t mask3 = 0x000E000000000000;
+    printf("base_offset: 0x%04lx\n", (desc & mask3) >> 49);
+
+    // swizzle_mode: bits 63–62 (2 bits)
+    uint64_t mask4 = 0xC000000000000000;
+    printf("swizzle_mode: 0x%04lx\n", (desc & mask4) >> 62);
+  }
 
   return desc;
 }
 
-// https://docs.nvidia.com/cuda/parallel-thread-execution/#matrix-fragments-for-wgmma-mma-async-m64nnk16
-__device__ void gen_indices(int* indexes_tile_D, const int* shape_tile_D, const int* stride_tile_D, int thread_idx) {
+// https://docs.nvidia.com/cuda/archive/12.4.0/parallel-thread-execution/index.html#matrix-fragments-for-wgmma-mma-async-m64nnk16
+__device__ void gen_indices(int* indexes_tile_D, const int* shape_gmma_D, const int* stride_gmma_D, int thread_idx) {
   int baseRow = (thread_idx / 4) + (thread_idx / 32) * 8;
   int baseCol  = (thread_idx % 4) * 2;
   int k = 0;
   int idx = 0;
-  for (int m = 0; m < (shape_tile_D[0] / 32); m++) {
+  for (int m = 0; m < (shape_gmma_D[0] / 32); m++) {
     int fragment_idx = k;
-    for (int n = 0; n < (shape_tile_D[1] / 8); n++) {
-      idx = (baseRow + m * 8) * stride_tile_D[0] + (baseCol + n * 8) * stride_tile_D[1];
+    for (int n = 0; n < (shape_gmma_D[1] / 8); n++) {
+      idx = (baseRow + m * 8) * stride_gmma_D[0] + (baseCol + n * 8) * stride_gmma_D[1];
       indexes_tile_D[fragment_idx]   = idx;
       indexes_tile_D[fragment_idx+1] = idx + 1;
       fragment_idx += 4;
@@ -322,6 +356,15 @@ __device__ void gen_indices(int* indexes_tile_D, const int* shape_tile_D, const 
   }
 }
 
+template <typename ABType, typename DType, int M_TILE, int N_TILE, int K_TILE>
+struct SharedStorage {
+  alignas(128) ABType double_tile_A[2 * M_TILE * K_TILE];
+  alignas(128) ABType double_tile_B[2 * N_TILE * K_TILE];
+  alignas(128) DType tile_D[M_TILE * N_TILE];
+  uint64_t mbar_A;
+  uint64_t mbar_B;
+  bool done[128];
+};
 
 /*===---------------------------------------------------------------------------------------------------------------===*/
 // gemm_tma_wgmma_bf16_fp32
@@ -338,43 +381,47 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   return; // requires SM90
 #endif
 
+  using SharedStorageType = SharedStorage<ABType, DType, M_TILE, N_TILE, K_TILE>;
+
+  // Dynamic shared buffer
+  extern __shared__ char shared_memory[];
+  SharedStorageType& smem = *reinterpret_cast<SharedStorageType*>(shared_memory);
+
   // Double buffers double_tile_A[M_TILE * K_TILE] and tile_A[M_TILE * K_TILE]
   constexpr uint32_t size_tile_A = M_TILE * K_TILE;
   constexpr uint32_t bytes_tile_A = size_tile_A * sizeof(ABType);
 
   // IMPORTANT NOTE:
   // alignas(128) must precede ABType
-  __shared__ alignas(128) ABType double_tile_A[2 * size_tile_A];
-  __shared__ alignas(128) ABType tile_A[size_tile_A];
+  // __shared__ alignas(128) ABType double_tile_A[size_tile_A];
+  ABType* double_tile_A = smem.double_tile_A;
 
   // Double buffers double_tile_B[K_TILE * N_TILE] and tile_B[K_TILE * N_TILE]
-  constexpr uint32_t size_tile_B = K_TILE * N_TILE;
+  constexpr uint32_t size_tile_B = N_TILE * K_TILE;
   constexpr uint32_t bytes_tile_B = size_tile_B * sizeof(ABType);
-  __shared__ alignas(128) ABType double_tile_B[2 * size_tile_B];
-  __shared__ alignas(128) ABType tile_B[size_tile_B];
+  // __shared__ alignas(128) ABType double_tile_B[size_tile_B];
+  ABType* double_tile_B = smem.double_tile_B;
 
   static_assert(bytes_tile_A + bytes_tile_B < 49152, "SMEM size exceeds the maximum value of 49152 bytes");
 
   // tile_D[M_TILE * N_TILE]
-  constexpr int size_tile_D = M_TILE * N_TILE;
-  constexpr int shape_tile_D[] = {M_TILE, N_TILE};
-  constexpr int stride_tile_D[] = {N_TILE, 1};
-  __shared__ alignas(128) DType tile_D[size_tile_D];
+  constexpr int shape_gmma_D[] = {64, 64};
+  constexpr int stride_gmma_D[] = {64, 1};
+  DType* tile_D = smem.tile_D;
 
   // two mbarriers: one for A, one for B
   // Ref: https://docs.nvidia.com/cuda/parallel-thread-execution/#parallel-synchronization-and-communication-instructions-mbarrier-size-alignment
-  __shared__ uint64_t mbar_A;
-  __shared__ uint64_t mbar_B;
+  uint64_t& mbar_A = smem.mbar_A;
+  uint64_t& mbar_B = smem.mbar_B;
 
-  // Create matrix descriptors
-  uint64_t desc_A = create_matrix_desc<ABType>(tile_A);
-  uint64_t desc_B = create_matrix_desc<ABType>(tile_B);
+  constexpr int M_PARTS = M_TILE / 64;
+  constexpr int N_PARTS = N_TILE / 64;
 
   // Accumulators for each thread
-  DType acc[32];
+  DType tile_acc[M_PARTS * N_PARTS * 32];
   #pragma unroll
-  for (int i = 0; i < 32; ++i) {
-    acc[i] = DType(0);
+  for (int i = 0; i < (M_PARTS * N_PARTS * 32); i++) {
+    tile_acc[i] = DType(0);
   }
 
   // Compute block tile indices
@@ -388,65 +435,96 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     return;
   }
 
-  auto stage_tile_A = [&size_tile_A](int stage) -> ABType* {
-    return double_tile_A + stage * size_tile_A;
-  };
+  constexpr int K_PARTS_TMA = K_TILE / 8;
 
-  auto stage_tile_B = [&size_tile_B](int stage) -> ABType* {
-    return double_tile_B + stage * size_tile_B;
-  };
+  auto tma_load_tile_A = [&](ABType* stage_tile_A, int k_tile) {
+    for (int k = 0; k < K_PARTS_TMA; k++) {  
+      for (int m = 0; m < M_PARTS; m++) {
+        // Initiate bulk tensor copy.
+        int row_A = m0 + m * 64;
+        int col_A = k_tile + k * 8;
+        printf("row_A = %d col_A = %d\n", row_A, col_A);
+        cp_async_bulk_tensor_2d_global_to_shared(
+          stage_tile_A,
+          &tensor_map_A,
+          row_A,
+          col_A,
+          &mbar_A
+        );
 
-  auto tma_load_tile_A = [&m0, &tensor_map_A](ABType* buffer_tile_A, int k_tile) {
-    int col_A = k_tile;
-    int row_A = m0;
-    cp_async_bulk_tensor_2d_global_to_shared(
-      buffer_tile_A,
-      &tensor_map_A,
-      col_A, // col goes first
-      row_A, // row goes next
-      &mbar_A
-    );
-  };
-
-  auto tma_load_tile_B = [&n0, &tensor_map_B](ABType* buffer_tile_B, int k_tile) {
-    int col_B = n0;
-    int row_B = k_tile;
-    cp_async_bulk_tensor_2d_global_to_shared(
-      buffer_tile_B,
-      &tensor_map_B,
-      col_B, // col goes first
-      row_B, // row goes next
-      &mbar_B
-    );
-  };
-
-  auto copy_tile_A = [&](ABType* buffer_tile_A, int tid) {
-    int m = tid / 2;
-    int k_start = 8 * (tid % 2);
-    for (int i = 0; i < 8; i++) {
-      int k = k_start + i;
-      int idx = m * K_TILE + k;
-      int linear_idx = m * 8 + (k % 8) + (m / 8) * 64 + (k / 8) * 64;
-      tile_A[linear_idx] = buffer_tile_A[idx];
+        stage_tile_A += 64 * 8;
+      }
+      printf("[A] Initiated bulk copy k=%d\n", k);
     }
   };
 
-  auto copy_tile_B = [&](ABType* buffer_tile_B, int tid) {
-    int k_start = 8 * (tid % 2);
-    int n = tid / 2;
-    for (int i = 0; i < 8; i++) {
-      int k = k_start + i;
-      int idx = k * N_TILE + n;
-      int linear_idx = n * 8 + (k % 8) + (n / 8) * 64 + (k / 8) * 64;
-      tile_B[linear_idx] = buffer_tile_B[idx];
+  auto tma_load_tile_B = [&](ABType* stage_tile_B, int k_tile) {
+    for (int k = 0; k < K_PARTS_TMA; k++) {  
+      for (int n = 0; n < N_PARTS; n++) {
+        int row_B = n0 + n * 64;
+        int col_B = k_tile + k * 8;
+        printf("row_B = %d col_B = %d\n", row_B, col_B);
+        cp_async_bulk_tensor_2d_global_to_shared(
+          stage_tile_B,
+          &tensor_map_B,
+          row_B,
+          col_B,
+          &mbar_B
+        );
+
+        stage_tile_B += 64 * 8;
+      }
+      printf("[B] Initiated bulk copy k=%d\n", k);
     }
   };
+
+  // Wait for threadIdx.x - 1 to complete
+  while (threadIdx.x > 0 && not smem.done[threadIdx.x - 1]) {
+    __nanosleep(1000);
+  }
+
+  // Create matrix descriptors
+  constexpr int K_PARTS_GMMA = K_TILE / 16;
+  uint64_t desc_A[2 * K_PARTS_GMMA * M_PARTS]; 
+  uint64_t desc_B[2 * K_PARTS_GMMA * N_PARTS];
+
+  for (int stage = 0; stage < 2; stage++) {
+    auto stage_tile_A = double_tile_A + stage * size_tile_A;
+    auto stage_tile_B = double_tile_B + stage * size_tile_B;
+    auto stage_desc_A = desc_A + stage * K_PARTS_GMMA * M_PARTS;
+    auto stage_desc_B = desc_B + stage * K_PARTS_GMMA * N_PARTS;
+
+    for (int k = 0; k < K_PARTS_GMMA; k++) {
+      printf("====================================================\n");
+      printf("k = %d\n", k);
+      printf("====================================================\n");
+      int offset_k = k * 256;
+      for (int m = 0; m < M_PARTS; m++) {
+        int offset_m = m * 64;
+        int offset = offset_k + offset_m;
+        printf("desc_A stage_tile_A=%p offset=%d\n", stage_tile_A, offset);
+        stage_desc_A[k * M_PARTS + m] = create_matrix_desc<ABType>(stage_tile_A, offset);
+      }
+
+      for (int n = 0; n < N_PARTS; n++) {
+        int offset_n = n * 64;
+        int offset = offset_k + offset_n;
+        printf("desc_B stage_tile_B=%p offset=%d\n", stage_tile_B, offset);
+        stage_desc_B[k * N_PARTS + n] = create_matrix_desc<ABType>(stage_tile_B, offset);
+      }
+
+      printf("\n");
+    }
+  }
+
+  printf("threadIdx.x = %3d init done\n\n", threadIdx.x);
+  smem.done[threadIdx.x] = true;
 
   // Thread ID
   int tid = threadIdx.x;
 
-  // Pipeline: prefetch stage 0
-  int stage = 0;
+  // Pipeline: prefetch current_stage 0
+  int current_stage = 0;
 
   // Initialize mbarriers once per block
   if (tid == 0) {
@@ -458,16 +536,10 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     mbarrier_arrive_and_expect_tx_bytes(&mbar_A, bytes_tile_A);
     mbarrier_arrive_and_expect_tx_bytes(&mbar_B, bytes_tile_B);
 
-    // 
-    // NOTE: TMA loads are asynchronous proxy operations.
-    // They write into double_tile_A/B in the current stage.
-    // 
+    tma_load_tile_A(double_tile_A + current_stage * size_tile_A, /*k_tile=*/0);
+    tma_load_tile_B(double_tile_B + current_stage * size_tile_B, /*k_tile=*/0);
 
-    // Load tile_A
-    tma_load_tile_A(stage_tile_A(stage), /*k_tile=*/0);
-
-    // Load tile_B
-    tma_load_tile_B(stage_tile_B(stage), /*k_tile=*/0);
+    printf("Initiated bulk copies\n");
   }
 
   // Syncthreads so initialized mbarriers are visible to all threads.
@@ -477,70 +549,101 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   // NOTE: after TMA transactions have finished, both mbar's current phases will be advanced to 1
   // The mbarrier_wait() only guarantees that the transaction count has been satisfied and 
   // the data is in shared memory somewhere — but not necessarily visible to all threads in the CTA yet.
-  mbarrier_wait(&mbar_A, /*phaseParity=*/stage);
-  mbarrier_wait(&mbar_B, /*phaseParity=*/stage);
+  mbarrier_wait(&mbar_A, /*phaseParity=*/current_stage);
+  mbarrier_wait(&mbar_B, /*phaseParity=*/current_stage);
+
+  printf("Thread %d has arrived\n", threadIdx.x);
 
   // This fence makes the loaded data globally visible to the CTA.
-  // Only after this fence are the normal stores in copy_tile_A/B guaranteed 
+  // Only after this fence are the normal reads guaranteed 
   // to read the up-to-date data from double_tile_A/B.
   fence_proxy_async();
 
+  // if (tid == 0) {
+  //   printf("\n");
+  //   printf("tile_A:\n");
+  //   auto stage_tile_A = double_tile_A + current_stage * size_tile_A;
+  //   for (int m = 0; m < M_TILE; m++) {
+  //     printf("m = %3d:", m);
+  //     for (int k = 0; k < K_TILE; k++) {
+  //       printf("%5.1f", (float)stage_tile_A[m + k * M_TILE]);
+  //     }
+  //     printf("\n");
+  //   }
+
+  //   printf("\n");
+
+  //   printf("tile_B:\n");
+  //   auto stage_tile_B = double_tile_B + current_stage * size_tile_B;
+  //   for (int n = 0; n < N_TILE; n++) {
+  //     printf("n = %3d:", n);
+  //     for (int k = 0; k < K_TILE; k++) {
+  //       printf("%5.1f", (float)stage_tile_B[n + k * N_TILE]);
+  //     }
+  //     printf("\n");
+  //   }
+
+  //   printf("\n");
+  // }
+
   // Create a MMA atom
-  MMA_64x64x16_F32F16F16_SS mma_atom;
+  MMA_64x64x16_F32F16F16_SS<1, 1, 1, 1, 1> mma_atom;
 
   // Main K loop with double buffering
   for (int k0 = 0; k0 < K; k0 += K_TILE) {
     int next_k = k0 + K_TILE;
-    int next_stage = stage ^ 1;
+    int next_stage = current_stage ^ 1;
 
     // Launch next TMA loads if there is a next slice
     if (tid == 0 && next_k < K) {
       mbarrier_arrive_and_expect_tx_bytes(&mbar_A, bytes_tile_A);
-      tma_load_tile_A(stage_tile_A(next_stage), next_k);
+      tma_load_tile_A(double_tile_A + next_stage * size_tile_A, next_k);
 
       mbarrier_arrive_and_expect_tx_bytes(&mbar_B, bytes_tile_B);
-      tma_load_tile_B(stage_tile_B(next_stage), next_k);
+      tma_load_tile_B(double_tile_B + next_stage * size_tile_B, next_k);
     }
 
-    // !!! IMPORTANT !!!
-    // Before executing wgmma, we need to copy double_tile_A -> tile_A and double_tile_B -> tile_B
-    // so that tile_A and tile_B have exact layouts as described here
-    // https://docs.nvidia.com/cuda/archive/12.4.1/parallel-thread-execution/index.html#shared-memory-layout-for-wgmma-mma-async-m64nnk16
-    copy_tile_A(stage_tile_A(stage), tid);
-    copy_tile_B(stage_tile_B(stage), tid);
+    auto stage_desc_A = desc_A + current_stage * K_PARTS_GMMA * M_PARTS;
+    auto stage_desc_B = desc_B + current_stage * K_PARTS_GMMA * N_PARTS;
 
-    // Ensure that all threads finish updating tile_A and tile_B
+    // Ensure that all threads sync here
     __syncthreads();
 
-    // Make tile_A and tile_B visible to WGMMA
-    fence_proxy_async();
+    for (int k = 0; k < K_PARTS_GMMA; k++) {
+      DType* acc = tile_acc;
+      for (int n = 0; n < N_PARTS; n++) {
+        for (int m = 0; m < M_PARTS; m++) {
+          // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
+          // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
+          // and subsequent accesses to the same registers by a `wgmma.mma_async` instruction. 
+          // Only the accumulator register and the input registers containing the fragments of matrix A require this ordering.
+          warpgroup_arrive();
 
-    // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
-    // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
-    // and subsequent accesses to the same registers by a `wgmma.mma_async` instruction. 
-    // Only the accumulator register and the input registers containing the fragments of matrix A require this ordering.
-    warpgroup_arrive();
+          // Issue WGMMA operation
+          mma_atom.fma(
+            acc[0],  acc[1],  acc[2],  acc[3],  acc[4],  acc[5],  acc[6],  acc[7],
+            acc[8],  acc[9],  acc[10], acc[11], acc[12], acc[13], acc[14], acc[15],
+            acc[16], acc[17], acc[18], acc[19], acc[20], acc[21], acc[22], acc[23],
+            acc[24], acc[25], acc[26], acc[27], acc[28], acc[29], acc[30], acc[31],
+            stage_desc_A[k * M_PARTS + m],
+            stage_desc_B[k * N_PARTS + n]
+          );
 
-    // Issue WGMMA operation
-    mma_atom.fma(
-      acc[0],  acc[1],  acc[2],  acc[3],  acc[4],  acc[5],  acc[6],  acc[7],
-      acc[8],  acc[9],  acc[10], acc[11], acc[12], acc[13], acc[14], acc[15],
-      acc[16], acc[17], acc[18], acc[19], acc[20], acc[21], acc[22], acc[23],
-      acc[24], acc[25], acc[26], acc[27], acc[28], acc[29], acc[30], acc[31],
-      desc_A,
-      desc_B
-    );
+          warpgroup_commit_batch();
 
-    warpgroup_commit_batch();
+          // Wait for MMA op to complete
+          warpgroup_wait<0>();
 
-    // Wait for MMA op to complete
-    warpgroup_wait<0>();
+          acc += 32;
+        }
+      }
+    }
 
-    // If next loads exist, wait for them to complete before swapping stage
+    // If next loads exist, wait for them to complete before swapping current_stage
     if (next_k < K) {
       mbarrier_wait(&mbar_A, /*phaseParity=*/next_stage); // NOTE: current phase LSB = 1
       mbarrier_wait(&mbar_B, /*phaseParity=*/next_stage); // NOTE: current phase LSB = 1
-      stage = next_stage;
+      current_stage = next_stage;
     }
 
     // Ensure that WGMMA finishes reading shared memory tile_A and tile_B
@@ -548,16 +651,28 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     fence_proxy_async();
   }
 
+  // Ensure that all threads finish updating tile_D
+  __syncthreads();
+
   // Epilogue: write acc to tile_D
   // Map acc indices -> tile D indices
-  int indices_tile_D[32];
-  gen_indices(indices_tile_D, shape_tile_D, stride_tile_D, tid);
+  int indices_gmma_D[32];
+  gen_indices(indices_gmma_D, shape_gmma_D, stride_gmma_D, tid);
 
-  // Copy fragments stored in acc to tile_D
-  // Each thread contributes 32 fragments
-  for (int i = 0; i < 32; i++) {
-    int idx = indices_tile_D[i];
-    tile_D[idx] = acc[i];
+  DType* acc = tile_acc;
+  DType* ptr_tile_D = tile_D;
+  for (int n = 0; n < N_PARTS; n++) {
+    for (int m = 0; m < M_PARTS; m++) {
+      // Copy fragments stored in acc to tile_D
+      // Each thread contributes 32 fragments
+      for (int i = 0; i < 32; i++) {
+        int idx = indices_gmma_D[i];
+        ptr_tile_D[idx] = acc[i];
+      }
+
+      acc += 32;
+      ptr_tile_D += 64 * 64;
+    }
   }
 
   // Ensure that all threads finish updating tile_D
@@ -568,12 +683,22 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
 
   // Finally, copy tile_D back to D in global memory
   if (tid == 0) {
-    int col_D = n0;
+    // printf("\n");
+    // printf("tile_D:\n");
+    // for (int m = 0; m < M_TILE; m++) {
+    //   printf("m = %3d:", m);
+    //   for (int n = 0; n < N_TILE; n++) {
+    //     printf("%10.2f", tile_D[m + n * M_TILE]);
+    //   }
+    //   printf("\n");
+    // }
+
     int row_D = m0;
+    int col_D = n0;
     cp_async_bulk_tensor_2d_shared_to_global(
       &tensor_map_D,
-      col_D,
       row_D,
+      col_D,
       tile_D
     );
 
@@ -619,8 +744,8 @@ void matmul_cpu_tile(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2]
       int idx = m * stride_D[0] + n * stride_D[1];
       for (int k = 0; k < K; k++) {
         auto mat_A_mk = static_cast<DType>(mat_A[m * stride_A[0] + k * stride_A[1]]);
-        auto mat_B_kn = static_cast<DType>(mat_B[k * stride_B[0] + n * stride_B[1]]);
-        mat_D[idx] += mat_A_mk * mat_B_kn;
+        auto mat_B_nk = static_cast<DType>(mat_B[n * stride_B[0] + k * stride_B[1]]);
+        mat_D[idx] += mat_A_mk * mat_B_nk;
       }
     }
   }
@@ -696,7 +821,7 @@ int main(int argc, char** argv) {
   using DType = float;
   using ABType = bf16_t;
 
-  int tile_count = 4;
+  int tile_count = 1;
   if (argc > 1) {
     tile_count = std::atoi(argv[1]);
   }
@@ -706,41 +831,46 @@ int main(int argc, char** argv) {
     std::exit(1);
   }
 
-  int max_round_count = 1;
+  bool perf_mode = false;
   if (argc > 2) {
-    max_round_count = std::atoi(argv[2]);
+    perf_mode = std::atoi(argv[2]) == 1;
   }
 
+  int max_round_count = 0;
+  if (perf_mode) {
+    max_round_count = 3;
+  }
 
-  constexpr int M_TILE = 64;
-  constexpr int N_TILE = 64;
-  constexpr int K_TILE = 16;
+  constexpr int M_TILE = 128;
+  constexpr int N_TILE = 128;
+  constexpr int K_TILE = 64;
 
-  const int M = M_TILE * tile_count;
-  const int N = N_TILE * tile_count;
-  const int K = K_TILE * tile_count;
+  const int M = M_TILE * 1;
+  const int N = N_TILE * 1;
+  const int K = K_TILE * 1;
 
   assert(tile_count <= 1024 && "Tile count must be less than 1024");
 
-  const bool perf_mode = max_round_count > 1;
+  printf("GEMM: M = %d N = %d K = %d\n", M, N, K);
 
   // Init cuda
   device_init(0);
+  printf("\n");
 
   int shape_A[] = {M, K};
-  int stride_A[] = {K, 1};
+  int stride_A[] = {1, M};
   thrust::host_vector<ABType> h_A(M * K);
   thrust::device_vector<ABType> d_A(M * K);
   auto d_A_ptr = d_A.data().get();
 
-  int shape_B[] = {K, N};
-  int stride_B[] = {N, 1};
-  thrust::host_vector<ABType> h_B(K * N);
-  thrust::device_vector<ABType> d_B(K * N);
+  int shape_B[] = {N, K};
+  int stride_B[] = {1, N};
+  thrust::host_vector<ABType> h_B(N * K);
+  thrust::device_vector<ABType> d_B(N * K);
   auto d_B_ptr = d_B.data().get();
 
   int shape_D[] = {M, N};
-  int stride_D[] = {N, 1};
+  int stride_D[] = {1, M};
   thrust::device_vector<DType> d_D(M * N, DType(0));
   auto d_D_ptr = d_D.data().get();
 
@@ -749,13 +879,13 @@ int main(int argc, char** argv) {
 
   // Create tensor maps
   CUtensorMap tensor_map_A{};
-  bool status_A = create_tensor_map<ABType, 0>(&tensor_map_A, d_A_ptr, M, K, M_TILE, K_TILE);
+  bool status_A = create_tensor_map<ABType, 3>(&tensor_map_A, d_A_ptr, M, K, 64, 8);
   if (!status_A) {
     return EXIT_FAILURE;
   }
 
   CUtensorMap tensor_map_B{};
-  bool status_B = create_tensor_map<ABType, 0>(&tensor_map_B, d_B_ptr, K, N, K_TILE, N_TILE);
+  bool status_B = create_tensor_map<ABType, 3>(&tensor_map_B, d_B_ptr, N, K, 64, 8);
   if (!status_B) {
     return EXIT_FAILURE;
   }
@@ -786,7 +916,7 @@ int main(int argc, char** argv) {
   int gridY = N / N_TILE;
   config.gridDim = dim3(gridX, gridY, 1);
 
-  // Threadblock: 128 threads (4 warps) for one warp-group
+    // Threadblock: 128 threads (4 warps) for one warp-group
   constexpr int THREADS_PER_BLOCK = 128;
   config.blockDim = dim3(THREADS_PER_BLOCK);
   config.stream = stream;
@@ -808,13 +938,13 @@ int main(int argc, char** argv) {
 
     for (int m = 0; m < M; m++) {
       for (int k = 0; k < K; k++) {
-        h_A[m * stride_A[0] + k * stride_A[1]] = ABType(dist(gen));
+        h_A[m * stride_A[0] + k * stride_A[1]] = ABType(dist(gen)); // ABType(k);
       }
     }
 
-    for (int k = 0; k < K; k++) {
-      for (int n = 0; n < N; n++) {
-        h_B[k * stride_B[0] + n * stride_B[1]] = ABType(dist(gen));
+    for (int n = 0; n < N; n++) {
+      for (int k = 0; k < K; k++) {
+        h_B[n * stride_B[0] + k * stride_B[1]] = ABType(dist(gen)); // ABType(k);
       }
     }
 
@@ -824,7 +954,7 @@ int main(int argc, char** argv) {
       fprint_mat(file_ptr, "h_A", h_A.data(), indices_A, shape_A, stride_A);
       fprintf(file_ptr, "\n\n");
 
-      const char indices_B[] = {'k', 'n'};
+      const char indices_B[] = {'n', 'k'};
       fprint_mat(file_ptr, "h_B", h_B.data(), indices_B, shape_B, stride_B);
       fprintf(file_ptr, "\n\n");
     }
@@ -833,11 +963,27 @@ int main(int argc, char** argv) {
     d_A = h_A;
     d_B = h_B;
 
+    // Dynamic shared memory
+    std::size_t dyn_smem_bytes = 2 * M_TILE * K_TILE * sizeof(ABType) + 
+                                 2 * N_TILE * K_TILE * sizeof(ABType) +
+                                 M_TILE * N_TILE * sizeof(DType) +
+                                 sizeof(uint64_t) + sizeof(uint64_t) + 128;
+    config.dynamicSmemBytes = dyn_smem_bytes;
+    
+    auto kernel_ptr = gemm_tma_wgmma_bf16_fp32<ABType, DType, M_TILE, N_TILE, K_TILE>;
+    CUDA_CHECK_ERROR(
+      cudaFuncSetAttribute(
+        (void*)kernel_ptr,
+        cudaFuncAttributeMaxDynamicSharedMemorySize,
+        dyn_smem_bytes
+      )
+    );
+
     // Launch wgmma_kernel
     CUDA_CHECK_ERROR(
       cudaLaunchKernelEx(
         &config,
-        gemm_tma_wgmma_bf16_fp32<ABType, DType, M_TILE, N_TILE, K_TILE>,
+        kernel_ptr,
         tensor_map_A, tensor_map_B, tensor_map_D,
         M, N, K
       )
@@ -877,12 +1023,12 @@ int main(int argc, char** argv) {
     for (auto& t : verifyThreads) {
       t.join();
     }
-    printf("Matrix D: OK=%d NG=%d\n\n", g_ok.fetch_add(0), g_ng.fetch_add(0));
+    printf("Matrix D: ok: %d ng: %d\n\n", g_ok.fetch_add(0), g_ng.fetch_add(0));
 
     round_ok += (g_ng == 0 ? 1 : 0);
     round_ng += (g_ng != 0 ? 1 : 0);
     round_counter++;
   } while(round_counter < max_round_count);
 
-  printf("ROUND_OK=%d ROUND_NG=%d\n", round_ok, round_ng);
+  printf("round_ok: %d round_ng: %d\n", round_ok, round_ng);
 }
