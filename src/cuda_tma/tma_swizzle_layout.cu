@@ -126,7 +126,6 @@ __global__ void tma_kernel(
   // The destination shared memory buffer of a bulk tensor operation should be
   // 128 byte aligned.
   __shared__ alignas(128) DataType smem_buffer_tma[SMEM_ROWS * SMEM_COLS];
-  __shared__ alignas(128) DataType smem_buffer_dst[SMEM_ROWS * SMEM_COLS];
 
   __shared__ uint64_t mbar_tma;
 
@@ -140,14 +139,14 @@ __global__ void tma_kernel(
     mbarrier_arrive_and_expect_tx_bytes(&mbar_tma, expected_bytes);
 
     int M = SMEM_ROWS / 64;
-    int K = SMEM_COLS / 8;
+    int K = SMEM_COLS / 64;
 
     auto smem_buffer_ptr = smem_buffer_tma;
     for (int k = 0; k < K; k++) {  
       for (int m = 0; m < M; m++) {
         // Initiate bulk tensor copy.
         int row = m * 64;
-        int col = k * 8;
+        int col = k * 64;
         cp_async_bulk_tensor_2d_global_to_shared(
           smem_buffer_ptr,
           &tensor_map_input_tma,
@@ -157,7 +156,7 @@ __global__ void tma_kernel(
         );
 
         printf("[tma_kernel] threadIdx.x %d initiated bulk tensor copy\n", threadIdx.x);
-        smem_buffer_ptr += 64 * 8;
+        smem_buffer_ptr += 64 * 64;
       }
     }
   }
@@ -173,28 +172,13 @@ __global__ void tma_kernel(
   // to read the up-to-date data from smem_buffer_tma.
   fence_proxy_async();
 
-  // int m = tid / 2;
-  // int k_start = 8 * (tid % 2);
-  // for (int i = 0; i < 8; i++) {
-  //   int k = k_start + i;
-  //   int idx = m * SMEM_COLS + k;
-  //   int linear_idx = m * 8 + (k % 8) + (m / 8) * 64 + (k / 8) * 64;
-  //   smem_buffer_dst[linear_idx] = smem_buffer_tma[idx];
-  // }
-
-  // // Ensure that all threads have finished copying smem_buffer_tma
-  // __syncthreads();
-
   if (tid == 0) {
     printf("\nsmem_buffer_tma:\n");
-    for (int i = 0; i < SMEM_ROWS; ++i) {
-      printf("i = %3d:", i);
-      for (int j = 0; j < SMEM_COLS; ++j) {
-        printf("%6.1f", (float)smem_buffer_tma[i + j * SMEM_ROWS]);
-      }
-      printf("\n");
+    for (int i = 0; i < 64; ++i) {
+      if (i > 0 and i % 8 == 0) printf("\n");
+      printf("%6.1f", (float)smem_buffer_tma[i]);
     }
-    printf("\n");
+    // printf("\n");
   }
 }
 
@@ -204,22 +188,21 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, uint ROWS, u
   constexpr uint32_t tensorRank = 2;
 
   // In CUDA, 
-  // dim0 = column
-  // dim1 = row
-  uint64_t globalDim[] = {ROWS, COLS, 1, 1, 1};
+  // globalDim[0] is contiguous
+  uint64_t globalDim[] = {ROWS, COLS};
 
   // The stride is the number of bytes to traverse from the first element of one row to the next.
   // It must be a multiple of 16.
-  uint64_t globalStrides[] = {sizeof(DataType), ROWS * sizeof(DataType), 0, 0, 0};
+  uint64_t globalStrides[] = {sizeof(DataType), ROWS * sizeof(DataType)};
   // LOG_DEBUG("globalStrides[0] = %ld\n", globalStrides[0]);
 
   // The boxDim is the size of the shared memory buffer that is used as the
   // destination of a TMA transfer.
-  uint32_t boxDim[] = {BOX_ROWS, BOX_COLS, 1, 1, 1};
+  uint32_t boxDim[] = {BOX_ROWS, BOX_COLS};
 
   // The distance between elements in units of sizeof(element). A stride of 2
   // can be used to load only the real component of a complex-valued tensor, for instance.
-  uint32_t elementStrides[] = {1, 1, 1, 1, 1};
+  uint32_t elementStrides[] = {1, 1};
 
   CUtensorMapDataType tensorDataType;
   if constexpr(std::is_same<DataType, int>()) {
@@ -285,7 +268,7 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, uint ROWS, u
 int main(int argc, char** argv) {
   using DataType = bf16_t;
   constexpr uint SMEM_ROWS = 64;
-  constexpr uint SMEM_COLS = 16;
+  constexpr uint SMEM_COLS = 64;
 
   int tile_count = 1;
   const uint GMEM_ROWS = SMEM_ROWS * tile_count;
@@ -327,7 +310,7 @@ int main(int argc, char** argv) {
   // Create tensor maps
   CUtensorMap tensor_map_input_tma{};
   int smem_box_rows = 64;
-  int smem_box_cols = 8;
+  int smem_box_cols = 64;
   bool status_input_tma = create_tensor_map<DataType, CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B>(
     &tensor_map_input_tma, 
     gmem_input_ptr, 

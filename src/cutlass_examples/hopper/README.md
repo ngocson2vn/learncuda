@@ -2,6 +2,11 @@
 `wgmma_tma_sm90.cu` is copied from [cutlass repo](https://github.com/NVIDIA/cutlass/tree/8cd5bef43a2b0d3f9846b026c271593c6e4a8e8a/examples/cute/tutorial/hopper)<br/>
 Git commit: https://github.com/NVIDIA/cutlass/tree/8cd5bef43a2b0d3f9846b026c271593c6e4a8e8a/examples/cute/tutorial/hopper
 
+# DEBUGGING
+Copy `print_type.hpp` to `cutlass/include/cute/util/print_type.hpp`.<br/>
+Then, we can use macros to debug GEMM kernels.
+
+
 # About wgmma_tma_sm90.cu
 ## Majorness
 Matrix A[M, K] with **M-major** layout means M-dimension is contiguous, which means Matrix A has column-major layout.<br/>

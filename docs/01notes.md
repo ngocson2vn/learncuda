@@ -466,3 +466,122 @@ data[tid] = (tid % 2 == 0) ? tid * 2 : tid * 3;
 ✅ **In short:** Warp divergence happens when threads in the same warp take different execution paths. The GPU then serializes those paths, leading to idle threads and performance loss.
 
 Would you like me to also explain **how modern NVIDIA compilers and hardware (Volta and later) partially mitigate warp divergence**?
+
+# Shared Memory
+## The Hardware Architecture: 32 Banks
+Shared memory is physically built from 32 separate memory banks. Each bank is 4 bytes (32 bits) wide.
+- Width: $32 \text{ banks} \times 4 \text{ bytes/bank} = \mathbf{128 \text{ bytes}}$.
+- This 128-byte horizontal slice is one "Physical Row".
+
+Each line below represents one Physical Row (128 Bytes). Addressing works by "Row Index" (Vertical) and "Bank Index" (Horizontal).
+```
+                   Bank 0    Bank 1    Bank 2   ...   Bank 31
+                +---------+---------+---------+-----+---------+
+Physical Row 0: | 4 Bytes | 4 Bytes | 4 Bytes | ... | 4 Bytes |  <-- Total: 128 Bytes
+                +---------+---------+---------+-----+---------+
+Physical Row 1: | 4 Bytes | 4 Bytes | 4 Bytes | ... | 4 Bytes |  <-- Total: 128 Bytes
+                +---------+---------+---------+-----+---------+
+Physical Row 2: | 4 Bytes | 4 Bytes | 4 Bytes | ... | 4 Bytes |
+                +---------+---------+---------+-----+---------+
+      ...
+```
+
+# How the WGMMA unit reads Core Matrix 0
+Ref: https://docs.nvidia.com/cuda/archive/12.4.0/parallel-thread-execution/index.html#shared-memory-layout-for-wgmma-mma-async-m64nnk16
+
+Given matrix A[M=64, K=64] in column-major layout (M is contiguous dimension),<br/>
+To understand how the WGMMA unit reads Core Matrix 0 ($A_{0..7, 0..7}$), we have to follow the data from the logical matrix indices down to the physical shared memory banks.
+
+The short answer is: It gathers 8 separated slices from 8 different physical rows simultaneously.Here is the step-by-step visualization of that read operation.
+
+## The Logical Target: Core Matrix 0
+The WGMMA unit wants to load the top-left $8 \times 8$ block of your matrix A.
+- Rows: $0 \dots 7$
+- Cols: $0 \dots 7$
+- Total Data: $8 \times 8 = 64$ elements (bf16).
+
+## The Physical Location (The "Slicing")
+Because your data is Column-Major (physically $M$ is contiguous) and stored in 128-byte physical rows in Shared Memory:
+- **Physical Row 0** holds the entire Column 0 ($M=0 \dots 63$).
+- **Physical Row 1** holds the entire Column 1
+- ....
+- **Physical Row 7** holds the entire Column 7.
+
+<img src="./images/matrix_a_in_shared_memory.png"><br/>
+
+Therefore, Core Matrix 0 is not stored as a contiguous square. It is "sliced" vertically across the first 8 physical rows of Shared Memory.<br/>
+<img src="./images/wgmma_core_matrix_0.png" width="30%">
+
+## The "Read" Operation
+When the wgmma instruction executes, it effectively issues 8 parallel requests to Shared Memory to assemble this block.
+Look at where that data lives in the Physical Rows above:
+
+- From Physical Row 0: It needs the first 16 bytes (Col 0, M=0..7).
+
+- From Physical Row 1: It needs the first 16 bytes (Col 1, M=0..7).
+
+- ...
+
+- From Physical Row 7: It needs the first 16 bytes (Col 7, M=0..7).
+
+Visualizing the Access: The hardware must "slice" vertically through the Physical Rows.
+```
+                Bank 0-3 (Bytes 0-15)       Bank 4-31
+              +-----------------------+-----------------------+
+Phys Row 0:   | [TARGET DATA: Col 0]  |     (Ignored)         |
+              +-----------------------+-----------------------+
+Phys Row 1:   | [TARGET DATA: Col 1]  |     (Ignored)         |
+              +-----------------------+-----------------------+
+   ...        |         ...           |        ...            |
+              +-----------------------+-----------------------+
+Phys Row 7:   | [TARGET DATA: Col 7]  |     (Ignored)         |
+              +-----------------------+-----------------------+
+```
+
+**Why Swizzling is Required**<br/>
+Without swizzling, every single one of those "TARGET DATA" blocks would be in Banks 0-3.
+- The hardware cannot read 8 different values from Bank 0 at the same time. This is a Bank Conflict.
+
+With SWIZZLE_128B: The hardware shuffles the "Physical" location. Even though Col 1 is logically similar to Col 0, the swizzle logic shifts it to different banks in Physical Row 1.
+```
+                 Bank 0-3      Bank 4-7      Bank 8-11 ...
+              +-------------+-------------+-------------+
+Phys Row 0:   | [Col 0 tgt] |             |             |  <-- Hit Banks 0-3
+              +-------------+-------------+-------------+
+Phys Row 1:   |             | [Col 1 tgt] |             |  <-- Hit Banks 4-7
+              +-------------+-------------+-------------+
+Phys Row 2:   |             |             | [Col 2 tgt] |  <-- Hit Banks 8-11
+              +-------------+-------------+-------------+
+```
+Now, the WGMMA instruction can issue one massive parallel read, and every "slice" comes from a different bank.
+
+**Summary:**
+- Physical Row: The 128-byte horizontal strip of 32 parallel memory banks.
+- Your Code: Maps 1 Logical Column $\rightarrow$ 1 Physical Row.
+- WGMMA: Needs to read small chunks from 8 different Physical Rows simultaneously to build its tile.
+
+## Matrix Descriptor
+Refs: 
+- https://docs.nvidia.com/cuda/archive/12.4.0/parallel-thread-execution/index.html#matrix-descriptor-format
+- https://docs.nvidia.com/cuda/archive/12.4.0/parallel-thread-execution/index.html#strides
+
+### Leading dimension byte offset (LDO)
+Leading dimension byte offset of matrix A or B is the distance, in bytes, between two adjacent core matrices in the K dimension.<br/>
+Usually, LDO = 0 when a swizzle mode is used.
+
+### Stride dimension byte offset (SDO)
+Stride dimension byte offset of matrix A or B is the distance, in bytes, between two adjacent core matrices in the M or N dimension.<br/>
+SDO is defined as the jump to the next Core Matrix (8 rows down) and we need to take the shape of matrix A or B in shared memory into account.
+For example, if A has shape 64x64, then SDO = 8 * 64 * sizeof(DataType). <br/>
+The WGMMA unit fetches data in "atoms" whose size depends on the swizzle mode. <br/>
+The hardware treats the start of the next row of a core matrix = the start of the current row + atom size (128B or 64B or 32B).
+
+### The Default Hardwired Definition (tnspA = 0)
+The WGMMA hardware is designed by default for Row-Major matrices (where $K$ is the inner/contiguous dimension).
+- Default "Leading Dimension Offset (LDO)": Controls $K$ (The inner dimension).  
+- Default "Stride Dimension Offset" (SDO): Controls $M$ (The outer dimension / rows). 
+
+### The "Transpose" Switch (tnspA = 1)
+When the WGMMA unit sees this bit set to 1, it performs a Hardware Swap:
+- Leading Dimension Offset is now routed to control $M$.
+- Stride Dimension Offset is now routed to control $K$.
