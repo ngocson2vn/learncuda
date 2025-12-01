@@ -26,7 +26,7 @@ template <typename T>
 void fprint_mat(FILE* file_ptr, const char* name, T* a, const char indices[2], const int shape[2], const int stride[2]) {
   // Header
   fprintf(file_ptr, "%s\n", name);
-  int num_chars = 8 + 11 * shape[1];
+  int num_chars = 8 + 10 * shape[1];
   fprintf(file_ptr, "%s\n", std::string(num_chars, '-').c_str());
   fprintf(file_ptr, "      %c:", indices[1]);
   for (int j = 0; j < shape[1]; j++) {
@@ -62,99 +62,11 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const char indices[2], c
 }
 
 
-void fprint_mat(FILE* file_ptr, const char* name, half* a, const char indices[2], const int shape[2], const int stride[2]) {
+template <typename T>
+__host__ __device__ void print_mat(const char* name, T* a, const char indices[2], const int shape[2], const int stride[2]) {
   constexpr int digits = 10;
-  std::string hformat = " %" + std::to_string(digits) + "d";
-  std::string eformat = " %" + std::to_string(digits) + ".5f";
-
-  // Header
-  fprintf(file_ptr, "%s\n", name);
-  int num_chars = 8 + (digits + 1) * shape[1];
-  fprintf(file_ptr, "%s\n", std::string(num_chars, '-').c_str());
-  fprintf(file_ptr, "      %c:", indices[1]);
-  for (int j = 0; j < shape[1]; j++) {
-    fprintf(file_ptr, hformat.c_str(), j);
-  }
-  fprintf(file_ptr, "\n%s\n", std::string(num_chars, '-').c_str());
-
-  // Body
-  for (int i = 0; i < shape[0]; i++) {
-    fprintf(file_ptr, "%c = %3d:", indices[0], i);
-    for (int j = 0; j < shape[1]; j++) {
-      fprintf(file_ptr, eformat.c_str(), __half2float(a[i * stride[0] + j * stride[1]]));
-      if (j == kMaxElement && j < shape[1] ) {
-        eformat = " ..." + eformat;
-        fprintf(file_ptr, eformat.c_str(), __half2float(a[i * stride[0] + (shape[1] - 1) * stride[1]]));
-        break;
-      }
-    }
-    fprintf(file_ptr, "\n");
-    if (i == kMaxElement && i < shape[0]) {
-      i = shape[0] - 1;
-      fprintf(file_ptr, ".\n.\n.\n");
-      fprintf(file_ptr, "%c = %3d:", indices[0], i);
-      for (int j = 0; j < shape[1]; j++) {
-        fprintf(file_ptr, eformat.c_str(), __half2float(a[i * stride[0] + j * stride[1]]));
-        if (j == kMaxElement && j < shape[1]) {
-          eformat = " ..." + eformat;
-          fprintf(file_ptr, eformat.c_str(), __half2float(a[i * stride[0] + (shape[1] - 1) * stride[1]]));
-          break;
-        }
-      }
-      break;
-    }
-  }
-}
-
-
-void fprint_mat(FILE* file_ptr, const char* name, int* a, const char indices[2], const int shape[2], const int stride[2]) {
-  constexpr int digits = 5;
-  std::string format = " %" + std::to_string(digits) + "d";
-
-  // Header
-  fprintf(file_ptr, "%s\n", name);
-  int num_chars = 8 + (digits + 1) * shape[1];
-  fprintf(file_ptr, "%s\n", std::string(num_chars, '-').c_str());
-  fprintf(file_ptr, "      %c:", indices[1]);
-  for (int j = 0; j < shape[1]; j++) {
-    fprintf(file_ptr, format.c_str(), j);
-  }
-  fprintf(file_ptr, "\n%s\n", std::string(num_chars, '-').c_str());
-
-  // Body
-  for (int i = 0; i < shape[0]; i++) {
-    fprintf(file_ptr, "%c = %3d:", indices[0], i);
-    for (int j = 0; j < shape[1]; j++) {
-      fprintf(file_ptr, format.c_str(), a[i * stride[0] + j * stride[1]]);
-      if (j == kMaxElement && j < shape[1]) {
-        format = " ..." + format;
-        fprintf(file_ptr, format.c_str(), a[i * stride[0] + (shape[1] - 1) * stride[1]]);
-        break;
-      }
-    }
-    fprintf(file_ptr, "\n");
-    if (i == kMaxElement && i < shape[0]) {
-      i = shape[0] - 1;
-      fprintf(file_ptr, ".\n.\n.\n");
-      fprintf(file_ptr, "%c = %3d:", indices[0], i);
-      for (int j = 0; j < shape[1]; j++) {
-        fprintf(file_ptr, format.c_str(), a[i * stride[0] + j * stride[1]]);
-        if (j == kMaxElement && j < shape[1]) {
-          format = " ..." + format;
-          fprintf(file_ptr, format.c_str(), a[i * stride[0] + (shape[1] - 1) * stride[1]]);
-          break;
-        }
-      }
-      break;
-    }
-  }
-}
-
-
-__host__ __device__ void print_mat(const char* name, int* a, const int shape[2], const int stride[2]) {
-  constexpr int digits = 10;
-  const char* hformat = " %10d";
-  const char* eformat = " %10d";
+  constexpr char hformat[] = "%10d";
+  constexpr char eformat[] = "%10.2f";
 
   // Header
   printf("%s\n", name);
@@ -165,7 +77,7 @@ __host__ __device__ void print_mat(const char* name, int* a, const int shape[2],
   }
   printf("\n");
 
-  printf("      j:");
+  printf("      %c: ", indices[1]);
   for (int j = 0; j < shape[1]; j++) {
     printf(hformat, j);
   }
@@ -178,115 +90,9 @@ __host__ __device__ void print_mat(const char* name, int* a, const int shape[2],
 
   // Body
   for (int i = 0; i < shape[0]; i++) {
-    printf("i = %3d:", i);
-    for (int j = 0; j < shape[1]; j++) {
-      printf(eformat, a[i * stride[0] + j * stride[1]]);
-    }
-    printf("\n");
-  }
-}
-
-
-__host__ __device__ void print_mat(const char* name, half* a, const int shape[2], const int stride[2]) {
-  constexpr int digits = 10;
-  const char* hformat = " %10d";
-  const char* eformat = " %10.5f";
-
-  // Header
-  printf("%s\n", name);
-  int num_chars = 8 + (digits + 1) * shape[1];
-
-  for (int i = 0; i < num_chars; i++) {
-    printf("-");
-  }
-  printf("\n");
-
-  printf("      j:");
-  for (int j = 0; j < shape[1]; j++) {
-    printf(hformat, j);
-  }
-  printf("\n");
-
-  for (int i = 0; i < num_chars; i++) {
-    printf("-");
-  }
-  printf("\n");
-
-  // Body
-  for (int i = 0; i < shape[0]; i++) {
-    printf("i = %3d:", i);
-    for (int j = 0; j < shape[1]; j++) {
-      printf(eformat, __half2float(a[i * stride[0] + j * stride[1]]));
-    }
-    printf("\n");
-  }
-}
-
-__host__ __device__ void print_mat(const char* name, bf16_t* a, const int shape[2], const int stride[2]) {
-  constexpr int digits = 10;
-  const char* hformat = " %10d";
-  const char* eformat = " %10.5f";
-
-  // Header
-  printf("%s\n", name);
-  int num_chars = 8 + (digits + 1) * shape[1];
-
-  for (int i = 0; i < num_chars; i++) {
-    printf("-");
-  }
-  printf("\n");
-
-  printf("      j: ");
-  for (int j = 0; j < shape[1]; j++) {
-    printf(hformat, j);
-  }
-  printf("\n");
-
-  for (int i = 0; i < num_chars; i++) {
-    printf("-");
-  }
-  printf("\n");
-
-  // Body
-  for (int i = 0; i < shape[0]; i++) {
-    printf("i = %3d:", i);
+    printf("%c = %3d:", indices[0], i);
     for (int j = 0; j < shape[1]; j++) {
       printf(eformat, (float)(a[i * stride[0] + j * stride[1]]));
-    }
-    printf("\n");
-  }
-}
-
-__host__ __device__ void print_mat(const char* name, float* a, const int shape[2], const int stride[2]) {
-  constexpr int digits = 10;
-  const char* hformat = " %10d";
-  const char* eformat = " %10.5f";
-
-  // Header
-  printf("%s\n", name);
-  int num_chars = 8 + (digits + 1) * shape[1];
-
-  for (int i = 0; i < num_chars; i++) {
-    printf("-");
-  }
-  printf("\n");
-
-  printf("      j:");
-  for (int j = 0; j < shape[1]; j++) {
-    printf(hformat, j);
-  }
-  printf("\n");
-
-  for (int i = 0; i < num_chars; i++) {
-    printf("-");
-  }
-  printf("\n");
-
-  // Body
-  for (int i = 0; i < shape[0]; i++) {
-    printf("i = %3d:", i);
-    for (int j = 0; j < shape[1]; j++) {
-      printf(eformat, a[i * stride[0] + j * stride[1]]);
     }
     printf("\n");
   }

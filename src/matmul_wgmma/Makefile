@@ -13,13 +13,13 @@ LDLIBS=-lcuda
 
 .SUFFIXES: .o .cu
 
-default: clean main_v2
+default: clean wgmma_with_tma
 
-main: main.o
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main.o $(LDLIBS)
+wgmma_with_tma: wgmma_with_tma.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ wgmma_with_tma.o $(LDLIBS)
 
-main.o: device.h fprint_mat.h main.cu
-	$(CXX) -c $(CXXFLAGS) -o "$@" main.cu
+wgmma_with_tma.o: device.h fprint_mat.h wgmma_with_tma.cu
+	$(CXX) -c $(CXXFLAGS) -o "$@" wgmma_with_tma.cu
 
 main_flops: main_flops.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main_flops.o $(LDLIBS)
@@ -37,4 +37,4 @@ test: fprint_mat.h test.cu
 	$(NVCC) $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -o test test.cu
 
 clean:
-	rm -rvf *.o main main_flops main_v2
+	rm -rvf *.o wgmma_with_tma main_flops main_v2 test
