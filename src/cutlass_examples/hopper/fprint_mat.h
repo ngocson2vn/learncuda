@@ -30,7 +30,7 @@ void fprint_mat(FILE* file_ptr, const char* name, const thrust::host_vector<T>& 
 
   // Header
   fprintf(file_ptr, "%s\n", name);
-  int num_chars = 8 + 11 * shape[1];
+  int num_chars = 8 + digits * shape[1];
   fprintf(file_ptr, "%s\n", std::string(num_chars, '-').c_str());
   fprintf(file_ptr, "      %c:", indices[1]);
   for (int j = 0; j < shape[1]; j++) {

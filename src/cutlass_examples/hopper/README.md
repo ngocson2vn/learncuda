@@ -499,3 +499,5 @@ struct DescriptorIterator
   }
 };
 ```
+
+# The handshake between TMA and WGMMA

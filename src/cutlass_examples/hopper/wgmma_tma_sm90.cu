@@ -52,6 +52,10 @@
 #include "matmul_cpu.h"
 #include "fprint_mat.h"
 
+constexpr int M_TILE = 64;
+constexpr int N_TILE = 64;
+constexpr int K_TILE = 64;
+
 using namespace cute;
 
 template <class ElementA,
@@ -194,25 +198,36 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
       PRINT_EXPR_TYPE("tma_a.with(producer_mbar[pipe])", tmp_tma_a);
       PRINT_EXPR_TYPE("tAgA(_,k_tile)", tAgA(_,k_tile));
       PRINT_EXPR_TYPE("tAsA(_,pipe)", tAsA(_,pipe));
+
+      printf("\n");
+      printf("=============================================\n");
+      printf("cute::copy A\n");
+      printf("=============================================\n");
       cute::copy(tmp_tma_a, tAgA(_,k_tile), tAsA(_,pipe));
+
+      printf("\n");
+
+      printf("=============================================\n");
+      printf("cute::copy B\n");
+      printf("=============================================\n");
       cute::copy(tma_b.with(producer_mbar[pipe]), tBgB(_,k_tile), tBsB(_,pipe));
     }
     --k_tile_count;
     ++k_tile;
   }
 
-  if (threadIdx.x == 0) {
-    auto smem_ptr = smem.A.begin();
-    PRINT_EXPR_TYPE("smem_ptr", smem_ptr);
-    for (int i = 0; i < 128; i++) {
-      printf("i = %3d:", i);
-      for (int j = 0; j < 64; j++) {
-        int idx = i + j * 128;
-        printf("%6.1f", (float)smem_ptr[idx]);
-      }
-      printf("\n");
-    }
-  }
+  // if (threadIdx.x == 0) {
+  //   auto smem_ptr = smem.A.begin();
+  //   PRINT_EXPR_TYPE("smem_ptr", smem_ptr);
+  //   for (int i = 0; i < 128; i++) {
+  //     printf("i = %3d:", i);
+  //     for (int j = 0; j < 64; j++) {
+  //       int idx = i + j * 128;
+  //       printf("%6.1f", (float)smem_ptr[idx]);
+  //     }
+  //     printf("\n");
+  //   }
+  // }
 
   //
   // Define A/B partitioning and C accumulators
@@ -335,11 +350,11 @@ gemm_nt(int m, int n, int k,
   auto dC = make_stride(Int<1>{}, ldC);                      // (dM, dN)
 
   // Define CTA tile sizes (static)
-  auto bM = Int<128>{};
-  auto bN = Int<128>{};
-  auto bK = Int< 64>{};
+  auto bM = Int<M_TILE>{};
+  auto bN = Int<N_TILE>{};
+  auto bK = Int<K_TILE>{};
   auto cta_tiler = make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
-  auto bP = Int<  1>{};  // Pipeline
+  auto bP = Int<3>{};  // Pipeline
 
   // Define the smem layouts (static)
   auto sA = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TA>{}, make_shape(bM,bK,bP));
@@ -420,9 +435,9 @@ gemm_tn(int m, int n, int k,
   auto dC = make_stride(Int<1>{}, ldC);                      // (dM, dN)
 
   // Define CTA tile sizes (static)
-  auto bM = Int<128>{};
-  auto bN = Int<128>{};
-  auto bK = Int< 64>{};
+  auto bM = Int<M_TILE>{};
+  auto bN = Int<N_TILE>{};
+  auto bK = Int<K_TILE>{};
   auto cta_tiler = make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
   auto bP = Int<3>{};  // Pipeline
 
@@ -516,26 +531,48 @@ int main(int argc, char** argv)
   }
 
 #if defined(CUTLASS_ARCH_MMA_SM90_SUPPORTED)
+  int m_scale_factor = 1;
+  if (argc > 1) {
+    m_scale_factor = std::atoi(argv[1]);
+    if (m_scale_factor <= 0) {
+      fprintf(stderr, "m_scale_factor must be a positive integer: %d\n", m_scale_factor);
+      std::exit(1);
+    }
+  }
 
-  int m = 128;
-  if (argc >= 2)
-    sscanf(argv[1], "%d", &m);
+  int n_scale_factor = 1;
+  if (argc > 2) {
+    n_scale_factor = std::atoi(argv[2]);
+    if (n_scale_factor <= 0) {
+      fprintf(stderr, "n_scale_factor must be a positive integer: %d\n", n_scale_factor);
+      std::exit(1);
+    }
+  }
 
-  int n = 128;
-  if (argc >= 3)
-    sscanf(argv[2], "%d", &n);
+  int k_scale_factor = 1;
+  if (argc > 3) {
+    k_scale_factor = std::atoi(argv[3]);
+    if (k_scale_factor <= 0) {
+      fprintf(stderr, "k_scale_factor must be a positive integer: %d\n", k_scale_factor);
+      std::exit(1);
+    }
+  }
 
-  int k = 64;
-  if (argc >= 4)
-    sscanf(argv[3], "%d", &k);
-
+  int m = M_TILE * m_scale_factor;
+  int n = N_TILE * n_scale_factor;
+  int k = K_TILE * k_scale_factor;
   char transA = 'N';
-  if (argc >= 5)
-    sscanf(argv[4], "%c", &transA);
-
   char transB = 'T';
-  if (argc >= 6)
-    sscanf(argv[5], "%c", &transB);
+
+  printf("M_TILE = %d\n", M_TILE);
+  printf("N_TILE = %d\n", N_TILE);
+  printf("K_TILE = %d\n", K_TILE);
+  printf("m_scale_factor = %d\n", m_scale_factor);
+  printf("n_scale_factor = %d\n", n_scale_factor);
+  printf("k_scale_factor = %d\n", k_scale_factor);
+  printf("M = %d\n", m);
+  printf("N = %d\n", n);
+  printf("K = %d\n", k);
 
   using TA = cute::bfloat16_t;
   using TB = cute::bfloat16_t;
@@ -593,23 +630,23 @@ int main(int argc, char** argv)
 
   const char indices_A[] = {'m', 'k'};
   const int shape_A[2] = {m, k};
-  const int stride_A[2] = {1, m};
+  const int stride_A[2] = {1, m}; // Col-major
   fprint_mat<TA, 7, 1>(file_ptr, "h_A", h_A, indices_A, shape_A, stride_A);
   fprintf(file_ptr, "\n\n");
 
   const char indices_B[] = {'n', 'k'};
   const int shape_B[2] = {n, k};
-  const int stride_B[2] = {1, n};
+  const int stride_B[2] = {1, n}; // Col-major
   fprint_mat<TA, 7, 1>(file_ptr, "h_B", h_B, indices_B, shape_B, stride_B);
   fprintf(file_ptr, "\n\n");
 
   const char indices_C[] = {'m', 'n'};
   const int shape_C[2] = {m, n};
-  const int stride_C[2] = {1, m};
+  const int stride_C[2] = {1, m}; // Col-major
 
   // CPU
   printf("Run matmul_cpu_parallel\n");
-  matmul_cpu_parallel<TA, TC, 128, 128, 1024>(h_A, h_B, h_C_cpu, stride_A, stride_B, stride_C, m, n, k);
+  matmul_cpu_parallel<TA, TC, M_TILE, N_TILE, 1024>(h_A, h_B, h_C_cpu, stride_A, stride_B, stride_C, m, n, k);
   fprint_mat<TC, 12, 1>(file_ptr, "h_C_cpu", h_C_cpu, indices_C, shape_C, stride_C);
   fprintf(file_ptr, "\n\n");
 
