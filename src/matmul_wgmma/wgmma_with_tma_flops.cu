@@ -15,6 +15,7 @@
 #include <thrust/device_vector.h>
 
 #include "fprint_mat.h"
+#include "util/GPU_Clock.hpp"
 
 using bf16_t = nv_bfloat16;
 
@@ -372,7 +373,6 @@ struct SharedStorage {
   alignas(128) DType tile_D[M_TILE * N_TILE];
   uint64_t mbar_A;
   uint64_t mbar_B;
-  bool done[128];
 };
 
 /*===---------------------------------------------------------------------------------------------------------------===*/
@@ -466,11 +466,6 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     );
   };
 
-  // // Wait for threadIdx.x - 1 to complete
-  // while (threadIdx.x > 0 && not smem.done[threadIdx.x - 1]) {
-  //   __nanosleep(1000);
-  // }
-
   // Create matrix descriptors
   uint64_t desc_A[2 * K_GMMA_PARTS]; 
   uint64_t desc_B[2 * K_GMMA_PARTS];
@@ -481,16 +476,13 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     auto stage_desc_A = desc_A + stage * K_GMMA_PARTS;
     auto stage_desc_B = desc_B + stage * K_GMMA_PARTS;
 
-    uint64_t stride_byte_offset = 8 * K_TILE * 2;
+    uint64_t stride_byte_offset = 8 * K_TILE * sizeof(ABType);
     for (int k = 0; k < K_GMMA_PARTS; k++) {
       uint64_t start_address_offset = k * K_GMMA;
       stage_desc_A[k] = create_matrix_desc<ABType>(stage_tile_A + start_address_offset, stride_byte_offset);
       stage_desc_B[k] = create_matrix_desc<ABType>(stage_tile_B + start_address_offset, stride_byte_offset);
     }
   }
-
-  // printf("threadIdx.x = %3d init done\n", threadIdx.x);
-  // smem.done[threadIdx.x] = true;
 
   // Thread ID
   int tid = threadIdx.x;
@@ -530,16 +522,6 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   // Only after this fence are the normal reads guaranteed 
   // to read the up-to-date data from double_tile_A/B.
   fence_proxy_async();
-
-#if 0
-  if (threadIdx.x == 0) {
-    const char indices[] = {'m', 'k'};
-    const int shape_tile_A[] = {M_TILE, K_TILE};
-    const int stride_tile_A[] = {1, M_TILE};
-    printf("\n");
-    print_mat("tile_A", stage_tile_A, indices, shape_tile_A, stride_tile_A);
-  }
-#endif
 
   // Create a MMA atom
   MMA_64x64x16_F32F16F16_SS<1, 1, 1, 0, 0> mma_atom;
@@ -618,7 +600,6 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   if (tid == 0) {
     int row_D = m0;
     int col_D = n0;
-    // printf("row_D = %d col_D=%d\n", row_D, col_D);
     cp_async_bulk_tensor_2d_shared_to_global(
       &tensor_map_D,
       col_D,
@@ -635,105 +616,6 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     // Wait for all the asynchronous operations belonging to the bulk async-group are complete.
     // `0` means the executing thread waits on all the prior bulk async-groups to complete.
     cp_async_bulk_wait_group_read<0>();
-  }
-}
-/*===---------------------------------------------------------------------------------------------------------------===*/
-
-
-// Dmn = sum_k(Amk * Bkn) = sum_k(Amk * tBnk) = sum_k(A[m * K + k] * tB[n * K + k])
-// where, tB is transposed B
-// mat_B must be pre-transposed as (N, K):(1, N)
-template <typename ABType, typename DType>
-void matmul_cpu(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int stride_B[2], int stride_D[2], int M, int N, int K) {
-  for (int m = 0; m < M; m++) {
-    for (int n = 0; n < N; n++) {
-      int idx = m * stride_D[0] + n * stride_D[1];
-      for (int k = 0; k < K; k++) {
-        auto mat_A_mk = static_cast<DType>(mat_A[m * stride_A[0] + k * stride_A[1]]);
-        auto mat_B_kn = static_cast<DType>(mat_B[k * stride_B[0] + n * stride_B[1]]);
-        mat_D[idx] += mat_A_mk * mat_B_kn;
-      }
-    }
-  }
-}
-
-
-template <typename ABType, typename DType, int M_TILE, int N_TILE>
-void matmul_cpu_tile(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int stride_B[2], int stride_D[2], int M, int N, int K, int m_start, int n_start) {
-  std::vector<std::thread> threads;
-  for (int i = 0; i < M_TILE; i++) {
-    int m = m_start + i;
-    for (int j = 0; j < N_TILE; j++) {
-      int n = n_start + j;
-      int idx = m * stride_D[0] + n * stride_D[1];
-      for (int k = 0; k < K; k++) {
-        auto mat_A_mk = static_cast<DType>(mat_A[m * stride_A[0] + k * stride_A[1]]);
-        auto mat_B_nk = static_cast<DType>(mat_B[n * stride_B[0] + k * stride_B[1]]);
-        mat_D[idx] += mat_A_mk * mat_B_nk;
-      }
-    }
-  }
-}
-
-constexpr unsigned int MAX_THREAD_COUNT = 1024;
-
-template <typename ABType, typename DType, int M_TILE, int N_TILE>
-void matmul_cpu_parallel(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int stride_B[2], int stride_D[2], int M, int N, int K) {
-  const int M_TILE_COUNT = M / M_TILE;
-  const int N_TILE_COUNT = N / N_TILE;
-  const int total_tiles = M_TILE_COUNT * N_TILE_COUNT;
-  const int total_batches = total_tiles / MAX_THREAD_COUNT + ((total_tiles % MAX_THREAD_COUNT) > 0 ? 1 : 0);
-  printf("Total batches of tiles to be processed: %d\n", total_batches);
-
-  std::vector<std::thread> threads;
-  int batch_count = 0;
-  for (int m_tile = 0; m_tile < M_TILE_COUNT; m_tile++) {
-    for (int n_tile = 0; n_tile < N_TILE_COUNT; n_tile++) {
-      threads.emplace_back(
-        matmul_cpu_tile<ABType, DType, M_TILE, N_TILE>, mat_A, mat_B, mat_D, stride_A, stride_B, stride_D, M, N, K, m_tile * M_TILE, n_tile * N_TILE
-      );
-
-      if (threads.size() == MAX_THREAD_COUNT) {
-        for (auto& t : threads) {
-          t.join();
-        }
-        batch_count++;
-        printf("Done processing batch %d of %d tiles\n", batch_count, threads.size());
-        threads.clear();
-      }
-    }
-  }
-
-  if (threads.size() > 0) {
-    for (auto& t : threads) {
-      t.join();
-    }
-    batch_count++;
-    printf("Done processing batch %d of %d tiles\n", batch_count, threads.size());
-  }
-}
-
-static std::atomic<int> g_ok(0);
-static std::atomic<int> g_ng(0);
-
-template <typename T>
-void verify(T* cpu_data, T* gpu_data, int start_idx, int numElements) {
-  int ok = 0;
-  int ng = 0;
-  constexpr T EPSILON = 1.0e-3;
-  for (int i = 0; i < numElements; i++) {
-    int idx = start_idx + i;
-    T diff = std::abs(cpu_data[idx] - gpu_data[idx]);
-    if (diff < EPSILON) {
-      ok++;
-    } else {
-      ng++;
-    }
-  }
-
-  g_ok.fetch_add(ok);
-  if (ng > 0) {
-    g_ng.fetch_add(ng);
   }
 }
 
@@ -772,6 +654,16 @@ int main(int argc, char** argv) {
     }
   }
 
+  int max_round_count = 100;
+  if (argc > 4) {
+    max_round_count = std::atoi(argv[4]);
+    if (max_round_count <= 0) {
+      LOG_ERROR("max_round_count must be a positive integer: %d\n", max_round_count);
+      std::exit(1);
+    }
+  }
+
+
   // NOTE: Currently, only support the following tile sizes
   // M_TILE = M_GMMA (64)
   // N_TILE = N_GMMA (64)
@@ -793,47 +685,32 @@ int main(int argc, char** argv) {
   printf("M = %d\n", M);
   printf("N = %d\n", N);
   printf("K = %d\n", K);
-
-  bool perf_mode = false;
-  int max_round_count = 0;
-  if (perf_mode) {
-    max_round_count = 3;
-  }
+  printf("max_round_count = %d\n", max_round_count);
 
   // Init cuda
   device_init(0);
   printf("\n");
 
-  printf("Allocate host and device buffers\n");
-  int shape_A[] = {M, K};
-  int stride_A[] = {K, 1};
   thrust::host_vector<ABType> h_A(M * K);
   thrust::device_vector<ABType> d_A(M * K);
   auto d_A_ptr = d_A.data().get();
 
-  int shape_B[] = {N, K};
-  int stride_B[] = {K, 1};
   thrust::host_vector<ABType> h_B(N * K);
   thrust::device_vector<ABType> d_B(N * K);
   auto d_B_ptr = d_B.data().get();
 
-  int shape_D[] = {M, N};
-  int stride_D[] = {N, 1};
-  thrust::device_vector<DType> d_D(M * N);
+  thrust::device_vector<DType> d_D(M * N, DType(0));
   auto d_D_ptr = d_D.data().get();
-
-  thrust::host_vector<DType> h_D_cpu(M * N);
-  thrust::host_vector<DType> h_D_gpu(M * N);
 
   // Create tensor maps
   CUtensorMap tensor_map_A{};
-  bool status_A = create_tensor_map<ABType, 3>(&tensor_map_A, d_A_ptr, M, K, M_TILE, 64); // BOX_COLS = 64
+  bool status_A = create_tensor_map<ABType, 3>(&tensor_map_A, d_A_ptr, M, K, M_TILE, K_TILE); // BOX_COLS = 64
   if (!status_A) {
     return EXIT_FAILURE;
   }
 
   CUtensorMap tensor_map_B{};
-  bool status_B = create_tensor_map<ABType, 3>(&tensor_map_B, d_B_ptr, N, K, N_TILE, 64); // BOX_COLS = 64
+  bool status_B = create_tensor_map<ABType, 3>(&tensor_map_B, d_B_ptr, N, K, N_TILE, K_TILE); // BOX_COLS = 64
   if (!status_B) {
     return EXIT_FAILURE;
   }
@@ -871,75 +748,38 @@ int main(int argc, char** argv) {
 
   std::random_device rd;  // Will be used to obtain a seed for the random number engine
   std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
-  std::uniform_int_distribution<int> dist(0, 3);
-  // std::uniform_real_distribution<float> dist(0.0, 1.0);
+  // std::uniform_int_distribution<int> dist(0, 3);
+  std::uniform_real_distribution<float> dist(0.0, 1.0);
 
-  FILE* file_ptr = nullptr;
+  for (int i = 0; i < M * K; i++) h_A[i] = ABType(dist(gen));
+  for (int i = 0; i < N * K; i++) h_B[i] = ABType(dist(gen));
 
-  int round_ok = 0;
-  int round_ng = 0;
-  int round_counter = 0;
-  do {
-    printf("Initialize host data\n");
+  // Transfer data from host to device
+  d_A = h_A;
+  d_B = h_B;
 
-    // Reset D matrices
-    std::fill(h_D_cpu.begin(), h_D_cpu.end(), DType(0));
-    std::fill(h_D_gpu.begin(), h_D_gpu.end(), DType(0));
+  // Dynamic shared memory
+  std::size_t dyn_smem_bytes = 2 * M_TILE * K_TILE * sizeof(ABType) + 
+                               2 * N_TILE * K_TILE * sizeof(ABType) +
+                               M_TILE * N_TILE * sizeof(DType) +
+                               sizeof(uint64_t) + sizeof(uint64_t);
+  config.dynamicSmemBytes = dyn_smem_bytes;
+  
+  auto kernel_ptr = gemm_tma_wgmma_bf16_fp32<ABType, DType, M_TILE, N_TILE, K_TILE>;
+  CUDA_CHECK_ERROR(
+    cudaFuncSetAttribute(
+      kernel_ptr,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      dyn_smem_bytes
+    )
+  );
 
-#if 0
-    for (int m = 0; m < M; m++) {
-      for (int k = 0; k < K; k++) {
-        h_A[m * stride_A[0] + k * stride_A[1]] = ABType(k);
-      }
-    }
+  double gflops = (2.0 * M * N * K) * 1e-9;
+  GPU_Clock timer;
 
-    for (int n = 0; n < N; n++) {
-      for (int k = 0; k < K; k++) {
-        h_B[n * stride_B[0] + k * stride_B[1]] = ABType(k);
-      }
-    }
-#else
-    for (int i = 0; i < M * K; i++) h_A[i] = ABType(dist(gen));
-    for (int i = 0; i < N * K; i++) h_B[i] = ABType(dist(gen));
-#endif
-
-    bool dump_data = !perf_mode and M * N < 1024 * 1024;
-
-    if (dump_data) {
-      file_ptr = get_file_ptr("output.txt");
-      const char indices_A[] = {'m', 'k'};
-      fprint_mat(file_ptr, "h_A", h_A.data(), indices_A, shape_A, stride_A);
-      fprintf(file_ptr, "\n\n");
-
-      const char indices_B[] = {'n', 'k'};
-      fprint_mat(file_ptr, "h_B", h_B.data(), indices_B, shape_B, stride_B);
-      fprintf(file_ptr, "\n\n");
-    }
-
-    // Transfer data from host to device
-    printf("Transfer data from host to device\n");
-    d_A = h_A;
-    d_B = h_B;
-
-    // Reset
-    d_D = h_D_cpu;
-
-    // Dynamic shared memory
-    std::size_t dyn_smem_bytes = 2 * M_TILE * K_TILE * sizeof(ABType) + 
-                                 2 * N_TILE * K_TILE * sizeof(ABType) +
-                                 M_TILE * N_TILE * sizeof(DType) +
-                                 sizeof(uint64_t) + sizeof(uint64_t) + 128;
-    config.dynamicSmemBytes = dyn_smem_bytes;
-    
-    auto kernel_ptr = gemm_tma_wgmma_bf16_fp32<ABType, DType, M_TILE, N_TILE, K_TILE>;
-    CUDA_CHECK_ERROR(
-      cudaFuncSetAttribute(
-        kernel_ptr,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        dyn_smem_bytes
-      )
-    );
-
+  // Check FLOPS
+  timer.start();
+  for (int i = 0; i < max_round_count; i++) {
     // Launch wgmma_kernel
     CUDA_CHECK_ERROR(
       cudaLaunchKernelEx(
@@ -950,10 +790,10 @@ int main(int argc, char** argv) {
       )
     );
 
-    // Copy output matrix
-    cudaMemcpyAsync(h_D_gpu.data(), d_D_ptr, M * N * sizeof(DType), cudaMemcpyDeviceToHost, stream);  
     CUDA_CHECK_ERROR(cudaDeviceSynchronize());
+  }
 
-    round_counter++;
-  } while(round_counter < max_round_count);
+  double gemm_time = timer.seconds() / max_round_count;
+  printf("GEMM time: %6.4f ms\n", gemm_time * 1000);
+  printf("GEMM FLOP: %6.1f GFLOP/s\n", gflops / gemm_time);
 }

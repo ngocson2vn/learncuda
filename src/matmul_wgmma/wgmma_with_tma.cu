@@ -32,6 +32,13 @@ do {                                          \
 #define LOG_DEBUG(format_str, ...)
 #endif
 
+#define LOG_INFO(format_str, ...)             \
+do {                                          \
+  std::lock_guard<std::mutex> lk(log_mutex);  \
+  printf("INFO ");                            \
+  printf(format_str, ##__VA_ARGS__);          \
+} while(0)
+
 #define LOG_ERROR(format_str, ...)            \
 do {                                          \
   std::lock_guard<std::mutex> lk(log_mutex);  \
@@ -650,8 +657,8 @@ void matmul_cpu(ABType* mat_A, ABType* mat_B, DType* mat_D, int stride_A[2], int
       int idx = m * stride_D[0] + n * stride_D[1];
       for (int k = 0; k < K; k++) {
         auto mat_A_mk = static_cast<DType>(mat_A[m * stride_A[0] + k * stride_A[1]]);
-        auto mat_B_kn = static_cast<DType>(mat_B[k * stride_B[0] + n * stride_B[1]]);
-        mat_D[idx] += mat_A_mk * mat_B_kn;
+        auto mat_B_nk = static_cast<DType>(mat_B[n * stride_B[0] + k * stride_B[1]]);
+        mat_D[idx] += mat_A_mk * mat_B_nk;
       }
     }
   }
@@ -728,6 +735,7 @@ void verify(T* cpu_data, T* gpu_data, int start_idx, int numElements) {
       ok++;
     } else {
       ng++;
+      LOG_INFO("[idx=%d] cpu != gpu: %.5f != %.5f (abs diff = %.5f)\n", idx, cpu_data[idx], gpu_data[idx], diff);
     }
   }
 
@@ -772,6 +780,15 @@ int main(int argc, char** argv) {
     }
   }
 
+  int max_round_count = 0;
+  if (argc > 4) {
+    max_round_count = std::atoi(argv[4]);
+    if (max_round_count <= 0) {
+      LOG_ERROR("max_round_count must be a positive integer: %d\n", max_round_count);
+      std::exit(1);
+    }
+  }
+
   // NOTE: Currently, only support the following tile sizes
   // M_TILE = M_GMMA (64)
   // N_TILE = N_GMMA (64)
@@ -794,11 +811,8 @@ int main(int argc, char** argv) {
   printf("N = %d\n", N);
   printf("K = %d\n", K);
 
-  bool perf_mode = false;
-  int max_round_count = 0;
-  if (perf_mode) {
-    max_round_count = 3;
-  }
+  bool perf_mode = max_round_count > 0;
+
 
   // Init cuda
   device_init(0);
@@ -871,8 +885,8 @@ int main(int argc, char** argv) {
 
   std::random_device rd;  // Will be used to obtain a seed for the random number engine
   std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
-  std::uniform_int_distribution<int> dist(0, 3);
-  // std::uniform_real_distribution<float> dist(0.0, 1.0);
+  // std::uniform_int_distribution<int> dist(0, 3);
+  std::uniform_real_distribution<float> dist(0.0, 1.0);
 
   FILE* file_ptr = nullptr;
 
@@ -903,16 +917,16 @@ int main(int argc, char** argv) {
     for (int i = 0; i < N * K; i++) h_B[i] = ABType(dist(gen));
 #endif
 
-    bool dump_data = !perf_mode and M * N < 1024 * 1024;
+    bool dump_data = (not perf_mode) and (M * N < 1024 * 1024);
 
     if (dump_data) {
       file_ptr = get_file_ptr("output.txt");
       const char indices_A[] = {'m', 'k'};
-      fprint_mat(file_ptr, "h_A", h_A.data(), indices_A, shape_A, stride_A);
+      fprint_mat(file_ptr, "h_A", h_A, indices_A, shape_A, stride_A);
       fprintf(file_ptr, "\n\n");
 
       const char indices_B[] = {'n', 'k'};
-      fprint_mat(file_ptr, "h_B", h_B.data(), indices_B, shape_B, stride_B);
+      fprint_mat(file_ptr, "h_B", h_B, indices_B, shape_B, stride_B);
       fprintf(file_ptr, "\n\n");
     }
 
@@ -964,14 +978,13 @@ int main(int argc, char** argv) {
     if (dump_data) {
       printf("Dumping cpu and gpu D matrices\n");
       const char indices_D[] = {'m', 'n'};
-      fprint_mat(file_ptr, "h_D_cpu", h_D_cpu.data(), indices_D, shape_D, stride_D);
+      fprint_mat(file_ptr, "h_D_cpu", h_D_cpu, indices_D, shape_D, stride_D);
       fprintf(file_ptr, "\n\n");
-      fprint_mat(file_ptr, "h_D_gpu", h_D_gpu.data(), indices_D, shape_D, stride_D);
+      fprint_mat(file_ptr, "h_D_gpu", h_D_gpu, indices_D, shape_D, stride_D);
     }
 
     // Verify
     printf("Verifying matrix D\n");
-    fflush(stdout);
     // Reset global counters
     g_ok = 0; g_ng = 0;
     std::vector<std::thread> verifyThreads;

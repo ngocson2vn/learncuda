@@ -22,15 +22,18 @@ FILE* get_file_ptr(const char* file_path) {
 
 constexpr static int kMaxElement = 10000000;
 
-template <typename T>
-void fprint_mat(FILE* file_ptr, const char* name, T* a, const char indices[2], const int shape[2], const int stride[2]) {
+template <typename T, int digits = 10, int mantissa = 3>
+void fprint_mat(FILE* file_ptr, const char* name, const thrust::host_vector<T>& a, const char indices[2], const int shape[2], const int stride[2]) {
+  std::string header_fmt = "%" + std::to_string(digits) + "d";
+  std::string element_fmt = "%" + std::to_string(digits) + "." + std::to_string(mantissa) + "f";
+
   // Header
   fprintf(file_ptr, "%s\n", name);
-  int num_chars = 8 + 10 * shape[1];
+  int num_chars = 8 + digits * shape[1];
   fprintf(file_ptr, "%s\n", std::string(num_chars, '-').c_str());
   fprintf(file_ptr, "      %c:", indices[1]);
   for (int j = 0; j < shape[1]; j++) {
-    fprintf(file_ptr, "%10d", j);
+    fprintf(file_ptr, header_fmt.c_str(), j);
   }
   fprintf(file_ptr, "\n%s\n", std::string(num_chars, '-').c_str());
 
@@ -38,9 +41,10 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const char indices[2], c
   for (int i = 0; i < shape[0]; i++) {
     fprintf(file_ptr, "%c = %3d:", indices[0], i);
     for (int j = 0; j < shape[1]; j++) {
-      fprintf(file_ptr, "%10.2f", (float)a[i * stride[0] + j * stride[1]]);
+      fprintf(file_ptr, element_fmt.c_str(), (float)a[i * stride[0] + j * stride[1]]);
       if (j == kMaxElement && j < shape[1]) {
-        fprintf(file_ptr, " ... %10.2f", (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
+        std::string efmt = " ... " + element_fmt;
+        fprintf(file_ptr, efmt.c_str(), (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
         break;
       }
     }
@@ -50,9 +54,10 @@ void fprint_mat(FILE* file_ptr, const char* name, T* a, const char indices[2], c
       fprintf(file_ptr, ".\n.\n.\n");
       fprintf(file_ptr, "%c = %3d:", indices[0], i);
       for (int j = 0; j < shape[1]; j++) {
-        fprintf(file_ptr, "%10.2f", (float)a[i * stride[0] + j * stride[1]]);
+        fprintf(file_ptr, "%15.3f", (float)a[i * stride[0] + j * stride[1]]);
         if (j == kMaxElement && j < shape[1]) {
-          fprintf(file_ptr, " ... %10.2f", (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
+          std::string efmt = " ... " + element_fmt;
+          fprintf(file_ptr, efmt.c_str(), (float)a[i * stride[0] + (shape[1] - 1) * stride[1]]);
           break;
         }
       }
