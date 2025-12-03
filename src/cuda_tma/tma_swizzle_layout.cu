@@ -127,7 +127,9 @@ __global__ void tma_kernel(
   // 128 byte aligned.
   __shared__ alignas(128) DataType smem_buffer_tma[SMEM_ROWS * SMEM_COLS];
 
+  // mbarrier
   __shared__ uint64_t mbar_tma;
+
 
   int tid = threadIdx.x;
 
@@ -138,27 +140,18 @@ __global__ void tma_kernel(
     int expected_bytes = SMEM_ROWS * SMEM_COLS * sizeof(DataType);
     mbarrier_arrive_and_expect_tx_bytes(&mbar_tma, expected_bytes);
 
-    int M = SMEM_ROWS / 64;
-    int K = SMEM_COLS / 64;
+    // Initiate bulk tensor copy.
+    int row = 0;
+    int col = 0;
+    cp_async_bulk_tensor_2d_global_to_shared(
+      smem_buffer_tma,
+      &tensor_map_input_tma,
+      col, // row-major -> col must be first
+      row,
+      &mbar_tma
+    );
 
-    auto smem_buffer_ptr = smem_buffer_tma;
-    for (int k = 0; k < K; k++) {  
-      for (int m = 0; m < M; m++) {
-        // Initiate bulk tensor copy.
-        int row = m * 64;
-        int col = k * 64;
-        cp_async_bulk_tensor_2d_global_to_shared(
-          smem_buffer_ptr,
-          &tensor_map_input_tma,
-          row,
-          col,
-          &mbar_tma
-        );
-
-        printf("[tma_kernel] threadIdx.x %d initiated bulk tensor copy\n", threadIdx.x);
-        smem_buffer_ptr += 64 * 64;
-      }
-    }
+    printf("[tma_kernel] threadIdx.x %d initiated bulk tensor copy\n", threadIdx.x);
   }
 
   // Syncthreads to ensure that initialized barrier is visible to all threads.
@@ -174,13 +167,17 @@ __global__ void tma_kernel(
 
   if (tid == 0) {
     printf("\nsmem_buffer_tma:\n");
-    for (int i = 0; i < 64; ++i) {
-      if (i > 0 and i % 8 == 0) printf("\n");
-      printf("%6.1f", (float)smem_buffer_tma[i]);
+    for (int m = 0; m < SMEM_ROWS; m++) {
+      printf("m = %3d:", m);
+      for (int k = 0; k < SMEM_COLS; k++) {
+        printf("%6.1f", (float)smem_buffer_tma[m * SMEM_COLS + k]);
+      }
+      printf("\n");
     }
-    // printf("\n");
+    printf("\n");
   }
 }
+
 
 template<typename DataType, CUtensorMapSwizzle swizzleMode>
 bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, uint ROWS, uint COLS, uint BOX_ROWS, uint BOX_COLS) {
@@ -189,16 +186,16 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, uint ROWS, u
 
   // In CUDA, 
   // globalDim[0] is contiguous
-  uint64_t globalDim[] = {ROWS, COLS};
+  uint64_t globalDim[] = {COLS, ROWS};
 
   // The stride is the number of bytes to traverse from the first element of one row to the next.
   // It must be a multiple of 16.
-  uint64_t globalStrides[] = {sizeof(DataType), ROWS * sizeof(DataType)};
+  uint64_t globalStrides[] = {sizeof(DataType), COLS * sizeof(DataType)};
   // LOG_DEBUG("globalStrides[0] = %ld\n", globalStrides[0]);
 
   // The boxDim is the size of the shared memory buffer that is used as the
   // destination of a TMA transfer.
-  uint32_t boxDim[] = {BOX_ROWS, BOX_COLS};
+  uint32_t boxDim[] = {BOX_COLS, BOX_ROWS};
 
   // The distance between elements in units of sizeof(element). A stride of 2
   // can be used to load only the real component of a complex-valued tensor, for instance.
@@ -220,6 +217,17 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, uint ROWS, u
 
   LOG_DEBUG("CUtensorMapDataType: %d\n", tensorDataType);
 
+  CUtensorMapL2promotion l2Promotion;
+  if constexpr(swizzleMode == CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE) {
+    l2Promotion = CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_NONE;
+  } else if constexpr(swizzleMode == CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B) {
+    l2Promotion = CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B;
+  } else if constexpr(swizzleMode == CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_64B) {
+    l2Promotion = CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_64B;
+  } else if constexpr(swizzleMode == CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_32B) {
+    l2Promotion = CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_NONE;
+  }
+
   // Create the tensor descriptor.
   CUresult ret = cuTensorMapEncodeTiled(
     tensorMap,                  // CUtensorMap *tensorMap,
@@ -240,7 +248,7 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, uint ROWS, u
 
     // L2 Promotion can be used to widen the effect of a cache-policy to a wider
     // set of L2 cache lines.
-    CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B,
+    l2Promotion,
 
     // Any element that is outside of bounds will be set to zero by the TMA transfer.
     CUtensorMapFloatOOBfill::CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE
@@ -274,18 +282,18 @@ int main(int argc, char** argv) {
   const uint GMEM_ROWS = SMEM_ROWS * tile_count;
   const uint GMEM_COLS = SMEM_COLS * tile_count;
   const uint shape[] = {GMEM_ROWS, GMEM_COLS};
-  const uint stride[] = {1, GMEM_ROWS};
+  const uint stride[] = {GMEM_COLS, 1};
 
   // Create matrix A as a host vector
   thrust::host_vector<DataType> h_input(GMEM_ROWS * GMEM_COLS, DataType(0));
 
   // Initialize matrix A with zeros
   printf("h_input:\n");
-  for (int i = 0; i < GMEM_ROWS; i++) {
-    printf("i = %2d: ", i);
-    for (int j = 0; j < GMEM_COLS; j++) { // only fill the real columns
-      int idx = i * stride[0] + j * stride[1];
-      h_input[idx] = DataType(j);
+  for (int m = 0; m < GMEM_ROWS; m++) {
+    printf("m = %3d: ", m);
+    for (int k = 0; k < GMEM_COLS; k++) { // only fill the real columns
+      int idx = m * stride[0] + k * stride[1];
+      h_input[idx] = DataType(k);
       printf("%5.1f ", (float)h_input[idx]);
     }
     printf("\n");
@@ -309,13 +317,11 @@ int main(int argc, char** argv) {
 
   // Create tensor maps
   CUtensorMap tensor_map_input_tma{};
-  int smem_box_rows = 64;
-  int smem_box_cols = 64;
   bool status_input_tma = create_tensor_map<DataType, CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_128B>(
     &tensor_map_input_tma, 
     gmem_input_ptr, 
     GMEM_ROWS, GMEM_COLS, 
-    smem_box_rows, smem_box_cols
+    SMEM_ROWS, SMEM_COLS
   );
   if (!status_input_tma) {
     return EXIT_FAILURE;
@@ -349,7 +355,7 @@ int main(int argc, char** argv) {
 
   CUDA_CHECK_ERROR(cudaDeviceSynchronize());
 
-  printf("DONE\n");
+  printf("\nDONE\n");
   printf("Please check %s\n", output_file);
   return 0;
 }

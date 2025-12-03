@@ -9,7 +9,7 @@ LDLIBS=-lcuda
 
 .SUFFIXES: .o .cu
 
-default: clean tma_swizzle_layout
+default: clean main3 tma_swizzle_layout
 
 main1: main1.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main1.o $(LDLIBS)
@@ -39,4 +39,4 @@ tma_swizzle_layout.o: fprint_mat.h device.h tma_swizzle_layout.cu
 	$(CXX) -c $(CXXFLAGS) -o "$@" tma_swizzle_layout.cu
 
 clean: 
-	rm -fv *.o output.txt main1 main2 main3
+	rm -fv *.o output.txt main1 main2 main3 tma_swizzle_layout
