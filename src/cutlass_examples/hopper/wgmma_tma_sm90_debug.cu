@@ -242,6 +242,7 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
 
     if ((warp_idx == 0) && lane_predicate && K_PIPE_MAX > 1)
     {
+      printf("k_tile_count = %d K_PIPE_MAX = %d\n", k_tile_count, (int)K_PIPE_MAX);
       int pipe = write_state.index();
       // Wait for Consumer to complete consumption
       ConsumerBarType::wait(&consumer_mbar[pipe], write_state.phase());
@@ -297,7 +298,7 @@ gemm_nt(int m, int n, int k,
   auto sB = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TB>{}, make_shape(bN,bK,bP));
 
   // Define the MMA
-  TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F16F16F16_SS<GMMA::Major::MN,GMMA::Major::MN>{});
+  TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F32BF16BF16_SS<GMMA::Major::MN,GMMA::Major::MN>{});
 
   // Define the TMAs
   // Create Global memory tensors for TMA inspection
@@ -315,7 +316,7 @@ gemm_nt(int m, int n, int k,
   // Launch parameter setup
   int smem_size = int(sizeof(SharedStorage<TA, TB, decltype(sA), decltype(sB)>));
   dim3 dimBlock(size(tiled_mma));
-  dim3 dimCluster(2, 1, 1);
+  dim3 dimCluster(1, 1, 1);
   dim3 dimGrid(round_up(size(ceil_div(m, bM)), dimCluster.x),
                round_up(size(ceil_div(n, bN)), dimCluster.y));
   cutlass::ClusterLaunchParams params = {dimGrid, dimBlock, dimCluster, smem_size};
@@ -370,18 +371,18 @@ gemm_tn(int m, int n, int k,
   auto dC = make_stride(Int<1>{}, ldC);                      // (dM, dN)
 
   // Define CTA tile sizes (static)
-  auto bM = Int<128>{};
-  auto bN = Int<128>{};
-  auto bK = Int< 64>{};
+  auto bM = Int<M_TILE>{};
+  auto bN = Int<N_TILE>{};
+  auto bK = Int<K_TILE>{};
   auto cta_tiler = make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
-  auto bP = Int<3>{};  // Pipeline
+  auto bP = Int<1>{};  // Pipeline
 
   // Define the smem layouts (static)
   auto sA = tile_to_shape(GMMA::Layout_K_SW128_Atom<TA>{}, make_shape(bM,bK,bP));
   auto sB = tile_to_shape(GMMA::Layout_K_SW128_Atom<TB>{}, make_shape(bN,bK,bP));
 
   // Define the MMA
-  TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F16F16F16_SS<GMMA::Major::K,GMMA::Major::K>{});
+  TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F32BF16BF16_SS<GMMA::Major::K,GMMA::Major::K>{});
 
   // Define the TMAs
   // Create Global memory tensors for TMA inspection
@@ -487,10 +488,10 @@ int main(int argc, char** argv)
   if (argc >= 6)
     sscanf(argv[5], "%c", &transB);
 
-  using TA = cute::half_t;
-  using TB = cute::half_t;
-  using TC = cute::half_t;
-  using TI = cute::half_t;
+  using TA = cute::bfloat16_t;
+  using TB = cute::bfloat16_t;
+  using TC = float;
+  using TI = cute::bfloat16_t;
 
   TI alpha = TI(1.0f);
   TI beta  = TI(0.0f);

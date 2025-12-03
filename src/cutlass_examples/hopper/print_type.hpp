@@ -32,23 +32,12 @@ __device__ void print_device_type(const char* name) {
   char* type = const_cast<char*>(func_name);
   char* ptr = type;
   int n = 0;
-  while (*ptr != '=') {
+  while (*ptr != '[') {
     ptr++;
     n++;
   }
 
-  type = type + (n + 2);
-  ptr = type;
-
-  n = 0;
-  while (*ptr != ']') {
-    ptr++;
-    n++;
-  }
-
-  *ptr = '\0';
-
-  printf("%s: %s\n", name, type);
+  printf("%s: %s\n", name, ptr);
 }
 
 }
