@@ -17,7 +17,7 @@ LDLIBS=-lcudart -lcuda
 
 .SUFFIXES: .o .cu
 
-default: clean main test
+default: clean main
 
 main: clean wgmma_tma_sm90.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(LIB_DIRS) -o $@ wgmma_tma_sm90.o $(LDLIBS)

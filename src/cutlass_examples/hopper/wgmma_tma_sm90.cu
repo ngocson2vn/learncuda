@@ -31,13 +31,11 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cassert>
-#include <random>
 
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 
 #include <cute/tensor.hpp>
-#include <cute/util/print_type.hpp>
 
 #include "cutlass/cluster_launch.hpp"
 #include "cutlass/arch/barrier.h"
@@ -48,13 +46,6 @@
 #include "cutlass/util/helper_cuda.hpp"
 #include "cutlass/arch/mma_sm90.h"
 #include "cutlass/device_kernel.h"
-
-#include "matmul_cpu.h"
-#include "fprint_mat.h"
-
-constexpr int M_TILE = 64;
-constexpr int N_TILE = 64;
-constexpr int K_TILE = 64;
 
 using namespace cute;
 
@@ -69,8 +60,6 @@ struct SharedStorage
 
   uint64_t tma_barrier[size<2>(SmemLayoutA{})];
   uint64_t mma_barrier[size<2>(SmemLayoutA{})];
-
-  bool done[128];
 };
 
 template <class ProblemShape, class CtaTiler,
@@ -87,10 +76,6 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
             TC      * C, CStride dC, TiledMma mma,
             Alpha alpha, Beta beta)
 {
-  if (blockIdx.x == 0 && threadIdx.x == 0) {
-    printf("%s\n", __PRETTY_FUNCTION__);
-  }
-
   // Preconditions
   CUTE_STATIC_ASSERT_V(rank(shape_MNK) == Int<3>{});                   // (M, N, K)
   CUTE_STATIC_ASSERT_V(rank(cta_tiler) == Int<3>{});                   // (BLK_M, BLK_N, BLK_K)
@@ -147,11 +132,8 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
                                     group_modes<0,2>(sB), group_modes<0,2>(gB));  // (TMA,k) and (TMA,PIPE)
 
   // The TMA is responsible for copying everything in mode-0 of tAsA and tBsB
-  constexpr int tx_bytes_a = sizeof(make_tensor_like(tensor<0>(tAsA)));
-  constexpr int tx_bytes_b = sizeof(make_tensor_like(tensor<0>(tBsB)));
-  PRINT_INT_VALUE("tx_bytes_a", tx_bytes_a); // 128 * 64 * 2 bytes
-  PRINT_INT_VALUE("tx_bytes_b", tx_bytes_b); // 128 * 64 * 2 bytes
-  constexpr int tma_transaction_bytes = tx_bytes_a + tx_bytes_b;
+  constexpr int tma_transaction_bytes = sizeof(make_tensor_like(tensor<0>(tAsA)))
+                                      + sizeof(make_tensor_like(tensor<0>(tBsB)));
 
   //
   // PREFETCH
@@ -161,10 +143,6 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
 
   // Total count of tiles
   int k_tile_count = size<1>(tAgA);
-
-  PRINT_INT_VALUE("K_PIPE_MAX", (int)K_PIPE_MAX);
-  PRINT_INT_VALUE("k_tile_count", (int)k_tile_count);
-
   // Current tile index in gmem to read from
   int k_tile = 0;
 
@@ -194,40 +172,12 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
     {
       // Set expected Tx Bytes after each reset / init
       ProducerBarType::arrive_and_expect_tx(&producer_mbar[pipe], tma_transaction_bytes);
-      auto tmp_tma_a = tma_a.with(producer_mbar[pipe]);
-      PRINT_EXPR_TYPE("tma_a.with(producer_mbar[pipe])", tmp_tma_a);
-      PRINT_EXPR_TYPE("tAgA(_,k_tile)", tAgA(_,k_tile));
-      PRINT_EXPR_TYPE("tAsA(_,pipe)", tAsA(_,pipe));
-
-      printf("\n");
-      printf("=============================================\n");
-      printf("cute::copy A\n");
-      printf("=============================================\n");
-      cute::copy(tmp_tma_a, tAgA(_,k_tile), tAsA(_,pipe));
-
-      printf("\n");
-
-      printf("=============================================\n");
-      printf("cute::copy B\n");
-      printf("=============================================\n");
-      cute::copy(tma_b.with(producer_mbar[pipe]), tBgB(_,k_tile), tBsB(_,pipe));
+      copy(tma_a.with(producer_mbar[pipe]), tAgA(_,k_tile), tAsA(_,pipe));
+      copy(tma_b.with(producer_mbar[pipe]), tBgB(_,k_tile), tBsB(_,pipe));
     }
     --k_tile_count;
     ++k_tile;
   }
-
-  // if (threadIdx.x == 0) {
-  //   auto smem_ptr = smem.A.begin();
-  //   PRINT_EXPR_TYPE("smem_ptr", smem_ptr);
-  //   for (int i = 0; i < 128; i++) {
-  //     printf("i = %3d:", i);
-  //     for (int j = 0; j < 64; j++) {
-  //       int idx = i + j * 128;
-  //       printf("%6.1f", (float)smem_ptr[idx]);
-  //     }
-  //     printf("\n");
-  //   }
-  // }
 
   //
   // Define A/B partitioning and C accumulators
@@ -270,34 +220,17 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
   CUTE_NO_UNROLL
   while (k_tile_count > -K_PIPE_MAX)
   {
-    PRINT_INT_VALUE("In while loop k_tile_count", (int)k_tile_count);
-
     // Wait for Producer to complete
     int read_pipe = read_state.index();
     ProducerBarType::wait(&producer_mbar[read_pipe], read_state.phase());
 
     // MMAs to cover 1 K_TILE
     warpgroup_arrive();
-    PRINT_EXPR_TYPE("mma", mma);
-    PRINT_EXPR_TYPE("tCrA", tCrA(_,_,_,read_pipe));
-    PRINT_EXPR_TYPE("tCrB", tCrB(_,_,_,read_pipe));
-    PRINT_EXPR_TYPE("tCrC", tCrC);
-    cute::gemm(mma, tCrA(_,_,_,read_pipe), tCrB(_,_,_,read_pipe), tCrC);     // (V,M) x (V,N) => (V,M,N)
+    gemm(mma, tCrA(_,_,_,read_pipe), tCrB(_,_,_,read_pipe), tCrC);     // (V,M) x (V,N) => (V,M,N)
     warpgroup_commit_batch();
 
     // Wait for all MMAs in a K_TILE to complete
     warpgroup_wait<0>();
-
-    // Wait for threadIdx.x - 1 to complete
-    while (threadIdx.x > 0 && !smem.done[threadIdx.x - 1]) {
-      __nanosleep(1000);
-    }
-
-    if (threadIdx.x == 0) {
-      printf("\n");
-    }
-    printf("threadIdx.x = %3d done\n", threadIdx.x);
-    smem.done[threadIdx.x] = true;
 
     // Notify that consumption is done
     ConsumerBarType::arrive(&consumer_mbar[read_pipe]);
@@ -310,7 +243,6 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
       ConsumerBarType::wait(&consumer_mbar[pipe], write_state.phase());
       // Set expected Tx Bytes after each reset / init
       ProducerBarType::arrive_and_expect_tx(&producer_mbar[pipe], tma_transaction_bytes);
-      PRINT_INT_VALUE("k_tile", k_tile);
       copy(tma_a.with(producer_mbar[pipe]), tAgA(_,k_tile), tAsA(_,pipe));
       copy(tma_b.with(producer_mbar[pipe]), tBgB(_,k_tile), tBsB(_,pipe));
       ++write_state;
@@ -350,18 +282,18 @@ gemm_nt(int m, int n, int k,
   auto dC = make_stride(Int<1>{}, ldC);                      // (dM, dN)
 
   // Define CTA tile sizes (static)
-  auto bM = Int<M_TILE>{};
-  auto bN = Int<N_TILE>{};
-  auto bK = Int<K_TILE>{};
+  auto bM = Int<128>{};
+  auto bN = Int<128>{};
+  auto bK = Int< 64>{};
   auto cta_tiler = make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
-  auto bP = Int<3>{};  // Pipeline
+  auto bP = Int<  3>{};  // Pipeline
 
   // Define the smem layouts (static)
   auto sA = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TA>{}, make_shape(bM,bK,bP));
   auto sB = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TB>{}, make_shape(bN,bK,bP));
 
   // Define the MMA
-  TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F32BF16BF16_SS<GMMA::Major::MN,GMMA::Major::MN>{});
+  TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F16F16F16_SS<GMMA::Major::MN,GMMA::Major::MN>{});
 
   // Define the TMAs
   // Create Global memory tensors for TMA inspection
@@ -379,8 +311,7 @@ gemm_nt(int m, int n, int k,
   // Launch parameter setup
   int smem_size = int(sizeof(SharedStorage<TA, TB, decltype(sA), decltype(sB)>));
   dim3 dimBlock(size(tiled_mma));
-  printf("\ndimBlock: %d\n", dimBlock.x);
-  dim3 dimCluster(1, 1, 1);
+  dim3 dimCluster(2, 1, 1);
   dim3 dimGrid(round_up(size(ceil_div(m, bM)), dimCluster.x),
                round_up(size(ceil_div(n, bN)), dimCluster.y));
   cutlass::ClusterLaunchParams params = {dimGrid, dimBlock, dimCluster, smem_size};
@@ -435,9 +366,9 @@ gemm_tn(int m, int n, int k,
   auto dC = make_stride(Int<1>{}, ldC);                      // (dM, dN)
 
   // Define CTA tile sizes (static)
-  auto bM = Int<M_TILE>{};
-  auto bN = Int<N_TILE>{};
-  auto bK = Int<K_TILE>{};
+  auto bM = Int<128>{};
+  auto bN = Int<128>{};
+  auto bK = Int< 64>{};
   auto cta_tiler = make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
   auto bP = Int<3>{};  // Pipeline
 
@@ -446,7 +377,7 @@ gemm_tn(int m, int n, int k,
   auto sB = tile_to_shape(GMMA::Layout_K_SW128_Atom<TB>{}, make_shape(bN,bK,bP));
 
   // Define the MMA
-  TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F32BF16BF16_SS<GMMA::Major::K,GMMA::Major::K>{});
+  TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F16F16F16_SS<GMMA::Major::K,GMMA::Major::K>{});
 
   // Define the TMAs
   // Create Global memory tensors for TMA inspection
@@ -531,135 +462,52 @@ int main(int argc, char** argv)
   }
 
 #if defined(CUTLASS_ARCH_MMA_SM90_SUPPORTED)
-  int m_scale_factor = 1;
-  if (argc > 1) {
-    m_scale_factor = std::atoi(argv[1]);
-    if (m_scale_factor <= 0) {
-      fprintf(stderr, "m_scale_factor must be a positive integer: %d\n", m_scale_factor);
-      std::exit(1);
-    }
-  }
 
-  int n_scale_factor = 1;
-  if (argc > 2) {
-    n_scale_factor = std::atoi(argv[2]);
-    if (n_scale_factor <= 0) {
-      fprintf(stderr, "n_scale_factor must be a positive integer: %d\n", n_scale_factor);
-      std::exit(1);
-    }
-  }
+  int m = 512;
+  if (argc >= 2)
+    sscanf(argv[1], "%d", &m);
 
-  int k_scale_factor = 1;
-  if (argc > 3) {
-    k_scale_factor = std::atoi(argv[3]);
-    if (k_scale_factor <= 0) {
-      fprintf(stderr, "k_scale_factor must be a positive integer: %d\n", k_scale_factor);
-      std::exit(1);
-    }
-  }
+  int n = 256;
+  if (argc >= 3)
+    sscanf(argv[2], "%d", &n);
 
-  int m = M_TILE * m_scale_factor;
-  int n = N_TILE * n_scale_factor;
-  int k = K_TILE * k_scale_factor;
+  int k = 1024;
+  if (argc >= 4)
+    sscanf(argv[3], "%d", &k);
+
   char transA = 'N';
+  if (argc >= 5)
+    sscanf(argv[4], "%c", &transA);
+
   char transB = 'T';
+  if (argc >= 6)
+    sscanf(argv[5], "%c", &transB);
 
-  printf("M_TILE = %d\n", M_TILE);
-  printf("N_TILE = %d\n", N_TILE);
-  printf("K_TILE = %d\n", K_TILE);
-  printf("m_scale_factor = %d\n", m_scale_factor);
-  printf("n_scale_factor = %d\n", n_scale_factor);
-  printf("k_scale_factor = %d\n", k_scale_factor);
-  printf("M = %d\n", m);
-  printf("N = %d\n", n);
-  printf("K = %d\n", k);
-
-  using TA = cute::bfloat16_t;
-  using TB = cute::bfloat16_t;
-  using TC = float;
-  using TI = float;
+  using TA = cute::half_t;
+  using TB = cute::half_t;
+  using TC = cute::half_t;
+  using TI = cute::half_t;
 
   TI alpha = TI(1.0f);
   TI beta  = TI(0.0f);
 
   thrust::host_vector<TA> h_A(m*k);
   thrust::host_vector<TB> h_B(n*k);
-  thrust::host_vector<TC> h_C_cpu(m*n);
-  thrust::host_vector<TC> h_C_gpu(m*n);
+  thrust::host_vector<TC> h_C(m*n);
 
   // Initialize the tensors
-  // for (int j = 0; j < m*k; ++j) h_A[j] = TA(int((rand() % 2) ? 1 : -1));
-  // for (int j = 0; j < n*k; ++j) h_B[j] = TB(int((rand() % 2) ? 1 : -1));
-  std::random_device rd;  // Will be used to obtain a seed for the random number engine
-  std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
-  std::uniform_int_distribution<int> dist(0, 3);
-
-  // int d = 0;
-  // for (int j = 0; j < m*k; ++j) {
-  //   if (j > 0 && j % m == 0) {
-  //     d += 1;
-  //   }
-  //   h_A[j] = TA(d);
-  // }
-
-  // d = 0;
-  // for (int j = 0; j < n*k; ++j) {
-  //   if (j > 0 && j % n == 0) {
-  //     d += 1;
-  //   }
-  //   h_B[j] = TB(d);
-  // }
-
-  for (int i = 0; i < m; i++) {
-    for (int j = 0; j < k; j++) {
-      h_A[i + j * m] = TA(dist(gen)); // ABType(j);
-    }
-  }
-
-  for (int i = 0; i < n; i++) {
-    for (int j = 0; j < k; j++) {
-      h_B[i + j * n] = TB(dist(gen)); // ABType(j);
-    }
-  }
-
-  for (int j = 0; j < m*n; ++j) h_C_cpu[j] = TC(0);
-  for (int j = 0; j < m*n; ++j) h_C_gpu[j] = TC(0);
-
-  // CPU GEMM
-  FILE* file_ptr = get_file_ptr("output.txt");
-
-  const char indices_A[] = {'m', 'k'};
-  const int shape_A[2] = {m, k};
-  const int stride_A[2] = {1, m}; // Col-major
-  fprint_mat<TA, 7, 1>(file_ptr, "h_A", h_A, indices_A, shape_A, stride_A);
-  fprintf(file_ptr, "\n\n");
-
-  const char indices_B[] = {'n', 'k'};
-  const int shape_B[2] = {n, k};
-  const int stride_B[2] = {1, n}; // Col-major
-  fprint_mat<TA, 7, 1>(file_ptr, "h_B", h_B, indices_B, shape_B, stride_B);
-  fprintf(file_ptr, "\n\n");
-
-  const char indices_C[] = {'m', 'n'};
-  const int shape_C[2] = {m, n};
-  const int stride_C[2] = {1, m}; // Col-major
-
-  // CPU
-  printf("Run matmul_cpu_parallel\n");
-  matmul_cpu_parallel<TA, TC, M_TILE, N_TILE, 1024>(h_A, h_B, h_C_cpu, stride_A, stride_B, stride_C, m, n, k);
-  fprint_mat<TC, 12, 1>(file_ptr, "h_C_cpu", h_C_cpu, indices_C, shape_C, stride_C);
-  fprintf(file_ptr, "\n\n");
-
-  printf("\n");
+  for (int j = 0; j < m*k; ++j) h_A[j] = TA(int((rand() % 2) ? 1 : -1));
+  for (int j = 0; j < n*k; ++j) h_B[j] = TB(int((rand() % 2) ? 1 : -1));
+  for (int j = 0; j < m*n; ++j) h_C[j] = TC(0);
 
   thrust::device_vector<TA> d_A = h_A;
   thrust::device_vector<TB> d_B = h_B;
-  thrust::device_vector<TC> d_C = h_C_gpu;
+  thrust::device_vector<TC> d_C = h_C;
 
-  // double gflops = (2.0*m*n*k) * 1e-9;
+  double gflops = (2.0*m*n*k) * 1e-9;
 
-  // const int timing_iterations = 100;
-  // GPU_Clock timer;
+  const int timing_iterations = 100;
+  GPU_Clock timer;
 
   int ldA = 0, ldB = 0, ldC = m;
 
@@ -680,6 +528,7 @@ int main(int argc, char** argv)
   }
 
   // Run once
+  d_C = h_C;
   gemm(transA, transB, m, n, k,
        alpha,
        d_A.data().get(), ldA,
@@ -687,25 +536,21 @@ int main(int argc, char** argv)
        beta,
        d_C.data().get(), ldC);
   CUTE_CHECK_LAST();
-  h_C_gpu = d_C;
-  fprint_mat<TC, 12, 1>(file_ptr, "h_C_gpu", h_C_gpu, indices_C, shape_C, stride_C);
+  thrust::host_vector<TC> cute_result = d_C;
 
-  // Verify
-  verify(h_C_cpu, h_C_gpu, m, n);
-
-  // // Timing iterations
-  // timer.start();
-  // for (int i = 0; i < timing_iterations; ++i) {
-  //   gemm(transA, transB, m, n, k,
-  //        alpha,
-  //        d_A.data().get(), ldA,
-  //        d_B.data().get(), ldB,
-  //        beta,
-  //        d_C.data().get(), ldC);
-  // }
-  // double cute_time = timer.seconds() / timing_iterations;
-  // CUTE_CHECK_LAST();
-  // printf("CUTE_GEMM:     [%6.1f]GFlop/s  (%6.4f)ms\n", gflops / cute_time, cute_time*1000);
+  // Timing iterations
+  timer.start();
+  for (int i = 0; i < timing_iterations; ++i) {
+    gemm(transA, transB, m, n, k,
+         alpha,
+         d_A.data().get(), ldA,
+         d_B.data().get(), ldB,
+         beta,
+         d_C.data().get(), ldC);
+  }
+  double cute_time = timer.seconds() / timing_iterations;
+  CUTE_CHECK_LAST();
+  printf("CUTE_GEMM:     [%6.1f]GFlop/s  (%6.4f)ms\n", gflops / cute_time, cute_time*1000);
 
 #else
   std::cout << "CUTLASS_ARCH_MMA_SM90_SUPPORTED must be enabled, but it is not. Test is waived \n" << std::endl;

@@ -506,3 +506,4 @@ struct DescriptorIterator
 ```
 
 # The handshake between TMA and WGMMA
+[Read docs/01notes.md](../../../docs/01notes.md#how-the-wgmma-unit-reads-core-matrix-0)
