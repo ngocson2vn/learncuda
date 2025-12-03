@@ -47,6 +47,10 @@
 #include "cutlass/arch/mma_sm90.h"
 #include "cutlass/device_kernel.h"
 
+constexpr int M_TILE = 64;
+constexpr int N_TILE = 64;
+constexpr int K_TILE = 64;
+
 using namespace cute;
 
 template <class ElementA,
@@ -236,7 +240,7 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
     ConsumerBarType::arrive(&consumer_mbar[read_pipe]);
     ++read_state;
 
-    if ((warp_idx == 0) && lane_predicate)
+    if ((warp_idx == 0) && lane_predicate && K_PIPE_MAX > 1)
     {
       int pipe = write_state.index();
       // Wait for Consumer to complete consumption
@@ -282,11 +286,11 @@ gemm_nt(int m, int n, int k,
   auto dC = make_stride(Int<1>{}, ldC);                      // (dM, dN)
 
   // Define CTA tile sizes (static)
-  auto bM = Int<128>{};
-  auto bN = Int<128>{};
-  auto bK = Int< 64>{};
+  auto bM = Int<M_TILE>{};
+  auto bN = Int<N_TILE>{};
+  auto bK = Int<K_TILE>{};
   auto cta_tiler = make_shape(bM, bN, bK);                   // (BLK_M, BLK_N, BLK_K)
-  auto bP = Int<  3>{};  // Pipeline
+  auto bP = Int<1>{};  // Pipeline
 
   // Define the smem layouts (static)
   auto sA = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TA>{}, make_shape(bM,bK,bP));
@@ -394,7 +398,7 @@ gemm_tn(int m, int n, int k,
 
   // Launch parameter setup
   dim3 dimBlock(size(tiled_mma));
-  dim3 dimCluster(2, 1, 1);
+  dim3 dimCluster(1, 1, 1);
   dim3 dimGrid(round_up(size(ceil_div(m, bM)), dimCluster.x),
                round_up(size(ceil_div(n, bN)), dimCluster.y));
   int  smemBytes = sizeof(SharedStorage<TA, TB, decltype(sA), decltype(sB)>);
@@ -463,15 +467,15 @@ int main(int argc, char** argv)
 
 #if defined(CUTLASS_ARCH_MMA_SM90_SUPPORTED)
 
-  int m = 512;
+  int m = 64;
   if (argc >= 2)
     sscanf(argv[1], "%d", &m);
 
-  int n = 256;
+  int n = 64;
   if (argc >= 3)
     sscanf(argv[2], "%d", &n);
 
-  int k = 1024;
+  int k = 64;
   if (argc >= 4)
     sscanf(argv[3], "%d", &k);
 

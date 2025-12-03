@@ -17,19 +17,25 @@ LDLIBS=-lcudart -lcuda
 
 .SUFFIXES: .o .cu
 
-default: clean main
+default: clean wgmma_tma_sm90_debug
 
-main: clean wgmma_tma_sm90.o
+wgmma_tma_sm90: clean wgmma_tma_sm90.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(LIB_DIRS) -o $@ wgmma_tma_sm90.o $(LDLIBS)
 
 wgmma_tma_sm90.o: fprint_mat.h wgmma_tma_sm90.cu
 	$(CXX) -c $(CXXFLAGS) -o "$@" wgmma_tma_sm90.cu
 
+wgmma_tma_sm90_debug: clean wgmma_tma_sm90_debug.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(LIB_DIRS) -o $@ wgmma_tma_sm90_debug.o $(LDLIBS)
+
+wgmma_tma_sm90_debug.o: fprint_mat.h wgmma_tma_sm90_debug.cu
+	$(CXX) -c $(CXXFLAGS) -o "$@" wgmma_tma_sm90_debug.cu
+
 test: clean_test
 	clang++ -std=c++17 -g -O0 -fno-inline $(ALL_INCLUDE) -o test test.cpp
 
 clean:
-	rm -rvf *.o main test
+	rm -rvf *.o main test wgmma_tma_sm90 wgmma_tma_sm90_debug
 
 clean_test:
 	rm -rvf test.o test
