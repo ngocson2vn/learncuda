@@ -14,6 +14,9 @@ https://0mean1sigma.com/author/tushar/
 
 https://www.aleksagordic.com/blog/matmul
 
+Flash Attention from Scratch Part 4: Bank Conflicts & Swizzling<br/>
+https://lubits.ch/flash/Part-4
+
 Markdown and LaTeX
 https://ashki23.github.io/markdown-latex.html
 
