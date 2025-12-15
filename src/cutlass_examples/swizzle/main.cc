@@ -12,6 +12,22 @@ namespace sony {
 template<typename T> 
 class TD;
 
+// 
+// https://github.com/NVIDIA/cutlass/blob/main/include/cute/swizzle.hpp
+// 
+// A generic Swizzle functor
+// Given an offset with binary representation:
+/* 0bxxxxxxxxxxxxxxxYYYxxxxxxxZZZxxxx
+ *                               ^--^ MBase is the number of least-sig bits to keep constant
+ *                  ^-^       ^-^     BBits is the number of bits in the mask
+ *                    ^---------^     SShift is the distance to shift the YYY mask
+ *                                       (pos shifts YYY to the right, neg shifts YYY to the left)
+ *
+ * e.g. Given
+ * 0bxxxxxxxxxxxxxxxxYYxxxxxxxxxZZxxx
+ * the result is
+ * 0bxxxxxxxxxxxxxxxxYYxxxxxxxxxAAxxx where AA = ZZ xor YY
+ */
 template <int BBits, int MBase, int SShift = BBits>
 struct Swizzle
 {
@@ -38,6 +54,8 @@ struct Swizzle
   auto
   apply(Offset const& offset)
   {
+    // YYY = offset & yyy_msk{}
+    // offset ^ (YYY >> msk_sft{}) <=> ZZZ ^ YYY, i.e., the original YYY bits flips ZZZ bits if Y = 1
     return offset ^ cute::shiftr(offset & yyy_msk{}, msk_sft{});   // ZZZ ^= YYY
   }
 
