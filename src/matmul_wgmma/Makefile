@@ -19,7 +19,7 @@ wgmma_with_tma: wgmma_with_tma.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ wgmma_with_tma.o $(LDLIBS)
 
 wgmma_with_tma.o: device.h fprint_mat.h wgmma_with_tma.cu
-	$(CXX) -c $(CXXFLAGS) -o "$@" wgmma_with_tma.cu
+	$(CXX) -c $(CXXFLAGS) --keep -o "$@" wgmma_with_tma.cu
 
 wgmma_with_tma_flops: wgmma_with_tma_flops.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ wgmma_with_tma_flops.o $(LDLIBS)

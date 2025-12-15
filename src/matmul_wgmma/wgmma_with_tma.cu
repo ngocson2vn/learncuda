@@ -61,10 +61,10 @@ __device__ uint32_t elect_leader_sync()
   uint32_t pred = 0;
   asm volatile(
     "{\n"
-      ".reg .pred p;\n"
-      "elect.sync _|p, %1;\n"
-      "@p mov.s32 %0, 1;\n"
-    "}\n"
+      "    .reg .pred p;\n"
+      "    elect.sync _|p, %1;\n"
+      "    @p mov.s32 %0, 1;\n"
+    "\t}\n"
     : "+r"(pred)
     : "r"(0xFFFFFFFF)
   );
@@ -123,14 +123,14 @@ __device__ void mbarrier_wait(void const* smem_ptr, uint32_t phaseParity) {
   // Arbitrarily large timer value after which try-wait expires and re-tries.
   uint32_t ticks = 0x989680;
   asm volatile(
-    "{\n\t"
-      ".reg .pred       P1; \n\t"
-      "LAB_WAIT: \n\t"
-        "mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1, %2; \n\t"
-        "@P1 bra DONE; \n\t"
-        "bra     LAB_WAIT; \n\t"
-      "DONE: \n"
-    "}"
+    "{\n"
+      "    .reg .pred P1;\n"
+      "    LAB_WAIT:\n"
+      "      mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1, %2;\n"
+      "      @P1 bra DONE;\n"
+      "      bra     LAB_WAIT;\n"
+      "    DONE:\n"
+    "\t}"
     :
     : "l"(smem_addr), "r"(phaseParity), "r"(ticks)
   );
@@ -184,22 +184,20 @@ struct MMA_64x64x16_F32F16F16_SS
       uint64_t const& desc_B)
   {
     asm volatile(
-      "{\n"
-        "wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 "
-        "{ %0,  %1,  %2,  %3,  %4,  %5,  %6,  %7,  "
-        "  %8,  %9, %10, %11, %12, %13, %14, %15,  "
-        " %16, %17, %18, %19, %20, %21, %22, %23,  "
-        " %24, %25, %26, %27, %28, %29, %30, %31 },"
-        " %32,"
-        " %33,"
-        " %34, %35, %36, %37, %38;\n"
-      "}\n"
-        : "+f"(d00), "+f"(d01), "+f"(d02), "+f"(d03), "+f"(d04), "+f"(d05), "+f"(d06), "+f"(d07),
-          "+f"(d08), "+f"(d09), "+f"(d10), "+f"(d11), "+f"(d12), "+f"(d13), "+f"(d14), "+f"(d15),
-          "+f"(d16), "+f"(d17), "+f"(d18), "+f"(d19), "+f"(d20), "+f"(d21), "+f"(d22), "+f"(d23),
-          "+f"(d24), "+f"(d25), "+f"(d26), "+f"(d27), "+f"(d28), "+f"(d29), "+f"(d30), "+f"(d31)
-        :  "l"(desc_A), "l"(desc_B),
-           "n"(scaleD), "n"(scaleA), "n"(scaleB), "n"(tnspA), "n"(tnspB)
+      "wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 "
+      "{%0, %1, %2, %3, %4, %5, %6, %7,"
+      " %8, %9, %10, %11, %12, %13, %14, %15,"
+      " %16, %17, %18, %19, %20, %21, %22, %23,"
+      " %24, %25, %26, %27, %28, %29, %30, %31},"
+      " %32,"
+      " %33,"
+      " %34, %35, %36, %37, %38;"
+      : "+f"(d00), "+f"(d01), "+f"(d02), "+f"(d03), "+f"(d04), "+f"(d05), "+f"(d06), "+f"(d07),
+        "+f"(d08), "+f"(d09), "+f"(d10), "+f"(d11), "+f"(d12), "+f"(d13), "+f"(d14), "+f"(d15),
+        "+f"(d16), "+f"(d17), "+f"(d18), "+f"(d19), "+f"(d20), "+f"(d21), "+f"(d22), "+f"(d23),
+        "+f"(d24), "+f"(d25), "+f"(d26), "+f"(d27), "+f"(d28), "+f"(d29), "+f"(d30), "+f"(d31)
+      :  "l"(desc_A), "l"(desc_B),
+          "n"(scaleD), "n"(scaleA), "n"(scaleB), "n"(tnspA), "n"(tnspB)
     );
   }
 };
@@ -592,6 +590,7 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   MMA_64x64x16_F32F16F16_SS<1, 1, 1, 0, 0> mma_atom;
 
   // Main K loop with double buffering
+  #pragma unroll 1
   for (int k0 = 0; k0 < K; k0 += K_TILE) {
     int next_k = k0 + K_TILE;
     int next_stage = current_stage ^ 1;
@@ -608,17 +607,17 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     auto stage_desc_A = desc_A + current_stage * K_GMMA_PARTS;
     auto stage_desc_B = desc_B + current_stage * K_GMMA_PARTS;
 
+    // Enforce all threads in a warp to sync here
+    canonical_warp_idx_sync();
+
+    // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
+    // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
+    // and subsequent accesses to the same registers by a `wgmma.mma_async` instruction. 
+    // Only the accumulator register and the input registers containing the fragments of matrix A require this ordering.
+    warpgroup_arrive();
+
     #pragma unroll
     for (int k = 0; k < K_GMMA_PARTS; k++) {
-      // Enforce all threads in a warp to sync here
-      canonical_warp_idx_sync();
-
-      // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
-      // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
-      // and subsequent accesses to the same registers by a `wgmma.mma_async` instruction. 
-      // Only the accumulator register and the input registers containing the fragments of matrix A require this ordering.
-      warpgroup_arrive();
-
       // Issue WGMMA operation
       mma_atom.fma(
         acc[0],  acc[1],  acc[2],  acc[3],  acc[4],  acc[5],  acc[6],  acc[7],
@@ -665,6 +664,8 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   // Copy fragments stored in acc to tile_D
   // Each thread contributes 32 fragments
   constexpr int num_acc = N_TILE / 4;
+
+  #pragma unroll
   for (int p = 0; p < 2; p++) {
     auto half_tile_D = tile_D + p * 64 * 32;
     for (int i = 0; i < num_acc; i++) {

@@ -567,6 +567,7 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   MMA_64x64x16_F32F16F16_SS<1, 1, 1, 0, 0> mma_atom;
 
   // Main K loop with double buffering
+  #pragma unroll 1
   for (int k0 = 0; k0 < K; k0 += K_TILE) {
     int next_k = k0 + K_TILE;
     int next_stage = current_stage ^ 1;
@@ -583,17 +584,17 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     auto stage_desc_A = desc_A + current_stage * K_GMMA_PARTS;
     auto stage_desc_B = desc_B + current_stage * K_GMMA_PARTS;
 
+    // Enforce all threads in a warp to sync here
+    canonical_warp_idx_sync();
+
+    // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
+    // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
+    // and subsequent accesses to the same registers by a `wgmma.mma_async` instruction. 
+    // Only the accumulator register and the input registers containing the fragments of matrix A require this ordering.
+    warpgroup_arrive();
+
     #pragma unroll
     for (int k = 0; k < K_GMMA_PARTS; k++) {
-      // Enforce all threads in a warp to sync here
-      canonical_warp_idx_sync();
-
-      // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
-      // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
-      // and subsequent accesses to the same registers by a `wgmma.mma_async` instruction. 
-      // Only the accumulator register and the input registers containing the fragments of matrix A require this ordering.
-      warpgroup_arrive();
-
       // Issue WGMMA operation
       mma_atom.fma(
         acc[0],  acc[1],  acc[2],  acc[3],  acc[4],  acc[5],  acc[6],  acc[7],
@@ -640,6 +641,8 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   // Copy fragments stored in acc to tile_D
   // Each thread contributes 32 fragments
   constexpr int num_acc = N_TILE / 4;
+
+  #pragma unroll
   for (int p = 0; p < 2; p++) {
     auto half_tile_D = tile_D + p * 64 * 32;
     for (int i = 0; i < num_acc; i++) {
