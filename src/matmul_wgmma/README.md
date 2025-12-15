@@ -136,3 +136,14 @@ https://docs.nvidia.com/cuda/parallel-thread-execution/#asynchronous-warpgroup-l
 
 <img src="./D.png" width="50%"/><br/>
 Ref: https://docs.nvidia.com/cuda/parallel-thread-execution/#matrix-fragments-for-wgmma-mma-async-m64nnk16
+<br/>
+
+# Profiling
+```Bash
+./wgmma_with_tma_flops 512 256 32 100000
+```
+GPU Utilization:<br/>
+```Bash
+nvidia-smi -i 0 -l 1
+```
+<img src="./gpu_util.png" width="80%" />

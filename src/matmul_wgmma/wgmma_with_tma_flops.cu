@@ -40,6 +40,31 @@ do {                                          \
   printf(format_str, ##__VA_ARGS__);          \
 } while(0)
 
+constexpr static int kThreadsPerWarp = 32;
+
+/// Returns a warp-uniform value indicating the canonical warp index of the calling threads.
+/// Threads within the warp must be converged.
+__device__ int canonical_warp_idx_sync() {
+  return __shfl_sync(0xffffffff, threadIdx.x / kThreadsPerWarp, 0);
+}
+
+// Elect one thread in the warp. 
+// The elected thread gets its predicate set to true, all others obtain false.
+__device__ uint32_t elect_leader_sync()
+{
+  uint32_t pred = 0;
+  asm volatile(
+    "{\n"
+      ".reg .pred p;\n"
+      "elect.sync _|p, %1;\n"
+      "@p mov.s32 %0, 1;\n"
+    "}\n"
+    : "+r"(pred)
+    : "r"(0xFFFFFFFF)
+  );
+
+  return pred;
+}
 
 __device__ void warpgroup_arrive()
 {
@@ -363,6 +388,18 @@ __device__ void gen_indices(int* indexes_tile_D, const int* shape_gmma_D, const 
   }
 }
 
+// Swizzle functor
+template <int BBits, int MBase, int SShift = BBits>
+struct Swizzle {
+  static constexpr int yyy_mask = ((1 << BBits) - 1) << (MBase + SShift);
+  static constexpr int num_shft = SShift;
+
+  __device__ int operator()(int offset) {
+    int yyy_bits = (offset & yyy_mask) >> num_shft;
+    return offset ^ yyy_bits; // <=> ZZZ ^ YYY
+  }
+};
+
 template <typename ABType, typename DType, int M_TILE, int N_TILE, int K_TILE>
 struct SharedStorage {
   // 
@@ -407,8 +444,6 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   ABType* double_tile_B = smem.double_tile_B;
 
   // tile_D[M_TILE * N_TILE]
-  constexpr int shape_gmma_D[] = {M_TILE, N_TILE};
-  constexpr int stride_gmma_D[] = {N_TILE, 1}; // Row-major
   DType* tile_D = smem.tile_D;
 
   // Two mbarriers: one for A, one for B
@@ -493,7 +528,12 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   auto stage_tile_B = double_tile_B + current_stage * num_elems_tile_B;
 
   // Initialize mbarriers once per block
-  if (tid == 0) {
+  int warp_idx = threadIdx.x / kThreadsPerWarp;
+  int is_leader = elect_leader_sync();
+
+  // Do not use if (threadIdx.x == 0) because nvcc may "insert a peeling loop over all active threads, which results in warp serialization and reduced performance."
+  // Ref: https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html#
+  if (warp_idx == 0 && is_leader) {
     // mbarrier.init.shared::cta [addr], expected_tx;
     mbarrier_init(&mbar_A, /*arrive_count=*/1); // NOTE: current phase = 0
     mbarrier_init(&mbar_B, /*arrive_count=*/1); // NOTE: current phase = 0
@@ -543,7 +583,11 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     auto stage_desc_A = desc_A + current_stage * K_GMMA_PARTS;
     auto stage_desc_B = desc_B + current_stage * K_GMMA_PARTS;
 
+    #pragma unroll
     for (int k = 0; k < K_GMMA_PARTS; k++) {
+      // Enforce all threads in a warp to sync here
+      canonical_warp_idx_sync();
+
       // Enforce an ordering of register accesses between wgmma.mma_async and other operations.
       // `wgmma.fence` instruction establishes an ordering between prior accesses to any warpgroup registers 
       // and subsequent accesses to the same registers by a `wgmma.mma_async` instruction. 
@@ -559,12 +603,14 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
         stage_desc_A[k],
         stage_desc_B[k]
       );
-
-      warpgroup_commit_batch();
     }
 
+    // Commit all wgmma ops into 1 group
+    warpgroup_commit_batch();
+
     // Wait for MMA ops to complete
-    warpgroup_wait<0>();
+    // N=1 means don't wait if there is only 1 underway group
+    warpgroup_wait<1>();
 
     // If next loads exist, wait for them to complete before swapping current_stage
     if (next_k < K) {
@@ -578,16 +624,30 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     fence_proxy_async();
   }
 
+  // Ensure that all MMA ops are complete
+  warpgroup_wait<0>();
+
   // Epilogue: write acc to tile_D
   // Map acc indices -> tile D indices
-  int indices_gmma_D[32];
+  constexpr int shape_gmma_D[] = {M_TILE, N_TILE / 2};
+  constexpr int stride_gmma_D[] = {N_TILE / 2, 1}; // Row-major
+  int indices_gmma_D[16];
   gen_indices(indices_gmma_D, shape_gmma_D, stride_gmma_D, tid);
+
+  // 128B swizzle mode
+  auto swizzle = Swizzle<3, 4, 3>();
 
   // Copy fragments stored in acc to tile_D
   // Each thread contributes 32 fragments
-  for (int i = 0; i < 32; i++) {
-    int idx = indices_gmma_D[i];
-    tile_D[idx] = acc[i];
+  constexpr int num_acc = N_TILE / 4;
+  for (int p = 0; p < 2; p++) {
+    auto half_tile_D = tile_D + p * 64 * 32;
+    for (int i = 0; i < num_acc; i++) {
+      int idx = indices_gmma_D[i];
+      int byte_offset = idx * sizeof(DType);
+      int swizzled_byte_offset = swizzle(byte_offset);
+      half_tile_D[swizzled_byte_offset / 4] = acc[p * num_acc + i];
+    }
   }
 
   // Ensure that all threads finish updating tile_D
@@ -597,14 +657,24 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
   fence_proxy_async();
 
   // Finally, copy tile_D back to D in global memory
-  if (tid == 0) {
-    int row_D = m0;
-    int col_D = n0;
+  is_leader = elect_leader_sync();
+  int row_D = m0;
+  int col_D = n0;
+  if (warp_idx == 0 && is_leader) {
+    // Left half of tile_D
     cp_async_bulk_tensor_2d_shared_to_global(
       &tensor_map_D,
       col_D,
       row_D,
       tile_D
+    );
+
+    // Right half of tile_D
+    cp_async_bulk_tensor_2d_shared_to_global(
+      &tensor_map_D,
+      col_D + 32,
+      row_D,
+      tile_D + 64 * 32
     );
 
     // Ref1: https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#completion-mechanisms-for-asynchronous-copy-operations
@@ -617,6 +687,9 @@ __global__ void gemm_tma_wgmma_bf16_fp32(
     // `0` means the executing thread waits on all the prior bulk async-groups to complete.
     cp_async_bulk_wait_group_read<0>();
   }
+
+  // Ensure that all threads finish together
+  __syncthreads();
 }
 
 
@@ -716,7 +789,7 @@ int main(int argc, char** argv) {
   }
 
   CUtensorMap tensor_map_D{};
-  bool status_D = create_tensor_map<DType, 0>(&tensor_map_D, d_D_ptr, M, N, M_TILE, N_TILE);
+  bool status_D = create_tensor_map<DType, 3>(&tensor_map_D, d_D_ptr, M, N, M_TILE, N_TILE / 2);
   if (!status_D) {
     return EXIT_FAILURE;
   }
