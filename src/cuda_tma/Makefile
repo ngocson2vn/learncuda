@@ -9,7 +9,7 @@ LDLIBS=-lcuda
 
 .SUFFIXES: .o .cu
 
-default: clean main3 tma_swizzle_layout
+default: clean tma_swizzle_layout
 
 main1: main1.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ main1.o $(LDLIBS)

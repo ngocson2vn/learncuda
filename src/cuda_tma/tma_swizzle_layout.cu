@@ -275,7 +275,7 @@ bool create_tensor_map(CUtensorMap* tensorMap, void* globalAddress, uint ROWS, u
 
 int main(int argc, char** argv) {
   using DataType = bf16_t;
-  constexpr uint SMEM_ROWS = 64;
+  constexpr uint SMEM_ROWS = 8;
   constexpr uint SMEM_COLS = 64;
 
   int tile_count = 1;
