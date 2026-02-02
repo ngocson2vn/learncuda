@@ -120,7 +120,7 @@ $L__BB0_15:
 // `.alloc`: Allocates space in TMEM (Tensor Memory). TMEM is a dedicated memory space on the SM used to feed Tensor Cores efficiently without consuming registers or standard Shared Memory bandwidth.
 // `.cta_group::1`: Specifies the scope of the allocation. `cta_group::1` indicates the allocation is for a single CTA (Cooperative Thread Array / Thread Block). Blackwell supports "multicast" or grouped behaviors (`cta_group::2`) where TMEM might be shared or accessed across multiple thread blocks in a cluster; here it is local to one.
 // `.sync.aligned`: A standard warp-level synchronization qualifier. It requires all threads in the active mask (the warp) to execute this instruction simultaneously and be converged.
-// `.shared::cta`: Specifies the state space of the destination operand. The result of the allocation (the TMEM address) will be written into Shared Memory.
+// `.shared::cta`: Specifies the state space of the destination operand. The result of the allocation (the TMEM handle) will be written into Shared Memory.
 // `.b32`: The data type of the destination operand (a 32-bit bitfield/address).
 // `[%r147]` (Destination): The instruction writes the base address (handle) of the allocated TMEM into the shared memory address stored in register `%r147`.
 // `64` (Source): The size of the allocation. TMEM is allocated in units of columns. This requests 64 columns of Tensor Memory.
@@ -132,7 +132,7 @@ $L__BB0_15:
 // Sync warp 0-7
 
 	ld.shared.b32 	%r214, [global_smem];
-// %r214 = TMEM address
+// %r214 = TMEM handle
 
 	bar.sync 	0, 256;
 // Sync warp 0-7
@@ -280,11 +280,11 @@ $L__tmp3:
 //   %r239 = [0, 2^21, 2^22, 2^22 + 2^21]
 
 	add.s32 	%r240, %r239, %r214;
-// %r240 = %r239 + TMEM_addr
+// %r240 = %r239 + TMEM_handle
 // TMEM
 //   col index: bits 15-0
 //   row index: bits 31-16
-// %r240 = TMEM_addr + [ROW_0, ROW_32, ROW_64, ROW_96]
+// %r240 = TMEM_handle + [ROW_0, ROW_32, ROW_64, ROW_96]
 
 	shl.b32 	%r241, %r237, 3;
 // %r241 = warp_id * 2^3
@@ -298,9 +298,9 @@ $L__tmp3:
 
 	add.s32 	%r148, %r240, %r242;
 // warp 0-3:
-//   %r148 = TMEM_addr + [ROW_0, ROW_32, ROW_64, ROW_96]
+//   %r148 = TMEM_handle + [ROW_0, ROW_32, ROW_64, ROW_96]
 // warp 4-7:
-//   %r148 = TMEM_addr + [ROW_0, ROW_32, ROW_64, ROW_96] + 2^5 (COL_32)
+//   %r148 = TMEM_handle + [ROW_0, ROW_32, ROW_64, ROW_96] + 2^5 (COL_32)
 
 	mov.pred 	%p40, -1;
 	mov.b32 	%r149, 0;
@@ -426,7 +426,7 @@ $L__tmp3:
 // 33554689 = 00000010|00000000|00000001|00000001
 
 	st.shared.b32 	[global_smem+81920], %r214;
-// Store TMEM_addr to [global_smem+81920]
+// Store TMEM_handle to [global_smem+81920]
 
 	barrier.sync 	1;
 // Warp 0-7 arrive at the 1st CTA sync point
@@ -669,7 +669,7 @@ $L__BB0_5:                              //   in Loop: Header=BB0_2 Depth=1
 	.loc	1 74 31                         // matmul_tma_kernel.py:74:31
 	setmaxnreg.inc.sync.aligned.u32 	24;
 	ld.shared.b32 	%r82, [global_smem+81920];
-// %r82 = TMEM_addr
+// %r82 = TMEM_handle
 
 	barrier.sync 	1;
 // Warp 10 arrives at the 2nd CTA sync point
@@ -760,7 +760,7 @@ $L__tmp5:
 	@%p14 tcgen05.mma.cta_group::1.kind::f16 [ %r82 + 0 ], %rd9, %rd10, %r83, %p13;
 	// end inline asm
 // The 1st MMA m64n64k16
-// %r82 = TMEM_addr
+// %r82 = TMEM_handle
 // %rd9 = a_matrix_descriptor
 // %rd10 = b_matrix_descriptor
 // %r83 = instruction_descriptor

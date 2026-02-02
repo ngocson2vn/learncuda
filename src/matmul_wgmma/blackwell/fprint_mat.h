@@ -22,7 +22,7 @@ FILE* get_file_ptr(const char* file_path) {
 
 constexpr static int kMaxElement = 10000000;
 
-template <typename T, int digits = 10, int mantissa = 3>
+template <typename T, int digits = 12, int mantissa = 3>
 void fprint_mat(FILE* file_ptr, const char* name, const thrust::host_vector<T>& a, const char indices[2], const int shape[2], const int stride[2]) {
   std::string header_fmt = "%" + std::to_string(digits) + "d";
   std::string element_fmt = "%" + std::to_string(digits) + "." + std::to_string(mantissa) + "f";

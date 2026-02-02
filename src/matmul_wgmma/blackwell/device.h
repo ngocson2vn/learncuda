@@ -3,6 +3,9 @@
 #include <cstdio>
 #include <cuda.h>
 
+#define STRINGIFY(x) #x
+#define TO_STR(x) STRINGIFY(x)
+
 #define CUDA_CHECK_ERROR(e)                                    \
 do {                                                           \
   cudaError_t code = cudaGetLastError();                       \
