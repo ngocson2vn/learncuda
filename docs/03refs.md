@@ -17,6 +17,8 @@ https://www.aleksagordic.com/blog/matmul
 Flash Attention from Scratch Part 4: Bank Conflicts & Swizzling<br/>
 https://lubits.ch/flash/Part-4
 
+https://gau-nernst.github.io/tcgen05/
+
 Markdown and LaTeX
 https://ashki23.github.io/markdown-latex.html
 
